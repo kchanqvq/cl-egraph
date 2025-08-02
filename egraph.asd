@@ -5,6 +5,7 @@
   :serial t
   :depends-on (:alexandria
                :serapeum
+               :metabang-bind
                :cl-custom-hash-table
                :global-vars)
   :components ((:file "egraph"))

@@ -1,6 +1,7 @@
 (uiop:define-package :egraph
     (:use :cl :alexandria)
   (:import-from :serapeum #:lret #:lret* #:-> #:string-prefix-p)
+  (:import-from :bind #:bind)
   (:export #:make-enode #:make-egraph #:enode-find #:list-enodes #:map-enodes
            #:egraph-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
@@ -62,7 +63,8 @@ enode is the representative of its own eclass."
   (hash-cons (make-hash-table :test 'term-equal :hash-function #'term-hash)
    :type hash-table)
   (classes (make-hash-table :test 'eq) :type hash-table)
-  (work-list))
+  (node-table (make-hash-table) :type hash-table)
+  (work-list nil :type list))
 
 (-> enode-find (enode) enode)
 (defun enode-find (enode)
@@ -135,6 +137,7 @@ Only contains canonical enodes after `egraph-rebuild'."
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons egraph))
       (egraph-merge egraph (make-enode egraph (enode-term enode)) enode)))
+  (clrhash (egraph-node-table egraph))
   (maphash
    (lambda (class ignore)
      (declare (ignore ignore))
@@ -147,8 +150,9 @@ Only contains canonical enodes after `egraph-rebuild'."
              (length (eclass-info-parents info)))
        (clrhash (eclass-info-node-table info))
        (dolist (node (eclass-info-nodes info))
-         (push node (gethash (car (enode-term node))
-                             (eclass-info-node-table info))))))
+         (let ((fsym (car (enode-term node))))
+           (push node (gethash fsym (eclass-info-node-table info)))
+           (push node (gethash fsym (egraph-node-table egraph)))))))
    (egraph-classes egraph)))
 
 (defun check-egraph (egraph)
@@ -188,53 +192,56 @@ Only contains canonical enodes after `egraph-rebuild'."
   (typecase object
     (symbol (string-prefix-p "?" (symbol-name object)))))
 
-(defun expand-match (pat eclass-var pat-var-alist cont)
-  (cond ((consp pat)
-         (let* ((fsym (car pat))
-                (arg-vars (make-gensym-list (length (cdr pat)) fsym)))
-           (labels ((process-args (args arg-vars pat-var-alist cont)
-                      (if args
-                          (expand-match
-                           (car args) (car arg-vars)
-                           pat-var-alist
-                           (lambda (pat-var-alist)
-                             (process-args (cdr args) (cdr arg-vars) pat-var-alist cont)))
-                          (funcall cont pat-var-alist))))
-             ;; If we run this not right after rebuilding, eclass-var might be
-             ;; bound to non-representative enode, thus need the `enode-find'
-             `(dolist (node (gethash ',fsym (eclass-info-node-table (enode-parent (enode-find ,eclass-var)))))
-                (destructuring-bind ,arg-vars (cdr (enode-term node))
-                  (declare (ignorable ,@arg-vars))
-                  ,(process-args (cdr pat) arg-vars pat-var-alist cont))))))
-        ((var-p pat)
-         (if-let (pat-var (assoc-value pat-var-alist pat))
-           `(when (eql ,eclass-var ,pat-var)
-              ,(funcall cont pat-var-alist))
-           (funcall cont (cons (cons pat eclass-var) pat-var-alist))))
-        (t ;; Non-variable atoms are short hand for 0-arity function symbol
-         (expand-match (list pat) eclass-var pat-var-alist cont))))
+(defun expand-match (pat-alist pat-var-alist cont)
+  "PAT-ALIST maps Lisp variable to lhs pattern, PAT-VAR-ALIST maps pattern variable
+to Lisp variable."
+  (if pat-alist
+      (bind ((((var . pat) . rest) pat-alist))
+        (cond ((consp pat)
+               (let* ((fsym (car pat))
+                      (arg-vars (make-gensym-list (length (cdr pat)) fsym)))
+                 ;; If we run this not right after rebuilding, var might be
+                 ;; bound to non-representative enode, thus need the `enode-find'
+                 `(dolist (node (gethash ',fsym (eclass-info-node-table (enode-parent (enode-find ,var)))))
+                    (destructuring-bind ,arg-vars (cdr (enode-term node))
+                      (declare (ignorable ,@arg-vars))
+                      ,(expand-match (nconc (mapcar #'cons arg-vars (cdr pat)) rest) pat-var-alist cont)))))
+              ((var-p pat)
+               (if-let (pat-var (assoc-value pat-var-alist pat))
+                 `(when (eql ,var ,pat-var)
+                    ,(expand-match rest pat-var-alist cont))
+                 (expand-match rest (cons (cons pat var) pat-var-alist) cont)))
+              (t ;; Non-variable atoms are short hand for 0-arity function symbol
+               (expand-match (cons (cons var (list pat)) rest) pat-var-alist cont))))
+      (funcall cont pat-var-alist)))
 
 (defun expand-template (tmpl egraph-var)
   (labels ((process (tmpl)
              (cond ((consp tmpl)
-                    `(make-enode ,egraph-var
-                                 (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
+                    `(let ((list (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
+                       (declare (dynamic-extent list))
+                       (make-enode ,egraph-var list)))
                    ((var-p tmpl) tmpl)
                    (t (process (list tmpl))))))
     (process tmpl)))
 
 (defmacro define-rewrite (name egraph-var pat &body body)
-  `(defun ,name (egraph)
-     (dolist (eclass (hash-table-keys (egraph-classes ,egraph-var)))
-       ,(expand-match pat 'eclass nil
-                      (lambda (pat-var-alist)
-                        (let ((pat-vars (mapcar #'car pat-var-alist))
-                              (match-vars (mapcar #'cdr pat-var-alist)))
-                          `(egraph-merge ,egraph-var
-                                         eclass
-                                         (let ,(mapcar #'list pat-vars match-vars)
-                                           (declare (ignorable ,@pat-vars))
-                                           ,@body))))))))
+  (let* ((fsym (car pat))
+         (arg-vars (make-gensym-list (length (cdr pat)) fsym)))
+    `(defun ,name (,egraph-var)
+       (dolist (top-node (gethash ',fsym (egraph-node-table ,egraph-var)))
+         (destructuring-bind ,arg-vars (cdr (enode-term top-node))
+           (declare (ignorable ,@arg-vars))
+           ,(expand-match (mapcar #'cons arg-vars (cdr pat))
+                          nil
+                          (lambda (pat-var-alist)
+                            (let ((pat-vars (mapcar #'car pat-var-alist))
+                                  (match-vars (mapcar #'cdr pat-var-alist)))
+                              `(egraph-merge ,egraph-var
+                                             top-node
+                                             (let ,(mapcar #'list pat-vars match-vars)
+                                               (declare (ignorable ,@pat-vars))
+                                               ,@body))))))))))
 
 (defmacro defrw (name lhs rhs &key (guard t))
   `(define-rewrite ,name egraph ,lhs
