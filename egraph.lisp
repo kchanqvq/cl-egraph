@@ -223,30 +223,37 @@ Only contains canonical enodes after `egraph-rebuild'."
 
 (defvar *fsym-info-var-alist*)
 
-(defun expand-match (pat-alist pat-var-alist cont)
-  "PAT-ALIST maps Lisp variable to lhs pattern, PAT-VAR-ALIST maps pattern variable
-to Lisp variable."
-  (if pat-alist
-      (bind ((((var . pat) . rest) pat-alist))
-        (cond ((consp pat)
-               (let* ((fsym (car pat))
-                      (arg-vars (make-gensym-list (length (cdr pat)) fsym))
-                      (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                                       (make-gensym fsym))))
-                 ;; If we run this not right after rebuilding, var might be
-                 ;; bound to non-representative enode, thus need the `enode-find'
-                 `(dolist (node (gethash (enode-find ,var) (fsym-info-node-table ,fsym-info-var)))
-                    (destructuring-bind ,arg-vars (cdr (enode-term node))
-                      (declare (ignorable ,@arg-vars))
-                      ,(expand-match (nconc (mapcar #'cons arg-vars (cdr pat)) rest) pat-var-alist cont)))))
-              ((var-p pat)
-               (if-let (pat-var (assoc-value pat-var-alist pat))
-                 `(when (eql ,var ,pat-var)
-                    ,(expand-match rest pat-var-alist cont))
-                 (expand-match rest (cons (cons pat var) pat-var-alist) cont)))
-              (t ;; Non-variable atoms are short hand for 0-arity function symbol
-               (expand-match (cons (cons var (list pat)) rest) pat-var-alist cont))))
-      (funcall cont pat-var-alist)))
+(defun parse-pattern (pat eclass-var)
+  "Convert PAT into a list of the form ((eclass-var fsym arg-var...) ...)."
+  (cond ((consp pat)
+         (let* ((fsym (car pat))
+                (arg-vars (mapcar (lambda (arg) (if (var-p arg) arg (make-gensym fsym))) (cdr pat))))
+           (cons (list* eclass-var fsym arg-vars)
+                 (mapcan (lambda (arg var)
+                           (unless (var-p arg)
+                             (parse-pattern arg var)))
+                         (cdr pat) arg-vars))))
+        ((var-p pat) (error "Single variable pattern not implemented."))
+        (t ;; Non-variable atoms are short hand for 0-arity function symbol
+         (parse-pattern (list pat) eclass-var))))
+
+(defun expand-match (bound-vars subst-alist cont)
+  (if subst-alist
+      (bind ((((var fsym . arg-vars) . rest) subst-alist))
+        (let ((lisp-arg-vars (mapcar (lambda (var) (if (member var bound-vars) (make-gensym fsym) var))
+                                     arg-vars))
+              (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
+                               (make-gensym fsym))))
+          ;; If we run this not right after rebuilding, var might be
+          ;; bound to non-representative enode, thus need the `enode-find'
+          `(dolist (node (gethash (enode-find ,var) (fsym-info-node-table ,fsym-info-var)))
+             (destructuring-bind ,lisp-arg-vars (cdr (enode-term node))
+               (declare (ignorable ,@lisp-arg-vars))
+               (when (and ,@ (mapcan (lambda (lisp-var var)
+                                       (when (member var bound-vars) `((eql ,lisp-var ,var))))
+                                     lisp-arg-vars arg-vars))
+                 ,(expand-match (union arg-vars bound-vars) rest cont))))))
+      (funcall cont)))
 
 (defun expand-template (tmpl egraph-var)
   (labels ((process (tmpl)
@@ -259,23 +266,15 @@ to Lisp variable."
     (process tmpl)))
 
 (defmacro define-rewrite (name egraph-var pat &body body)
-  (let* ((*fsym-info-var-alist* nil)
-         (fsym (car pat))
+  (bind ((((_ fsym . arg-vars) . rest-subst) (parse-pattern pat 'top-node))
+         (*fsym-info-var-alist* nil)
          (fsym-info-var
-           (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-             (make-gensym fsym)))
-         (arg-vars (make-gensym-list (length (cdr pat)) fsym))
+          (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
+            (make-gensym fsym)))
          (match-body
-           (expand-match (mapcar #'cons arg-vars (cdr pat))
-                         nil
-                         (lambda (pat-var-alist)
-                           (let ((pat-vars (mapcar #'car pat-var-alist))
-                                 (match-vars (mapcar #'cdr pat-var-alist)))
-                             `(egraph-merge ,egraph-var
-                                            top-node
-                                            (let ,(mapcar #'list pat-vars match-vars)
-                                              (declare (ignorable ,@pat-vars))
-                                              ,@body)))))))
+          (expand-match arg-vars rest-subst
+                        (lambda ()
+                          `(egraph-merge ,egraph-var top-node (locally ,@body))))))
     `(defun ,name (,egraph-var)
        (let ,(mapcar (lambda (kv) `(,(cdr kv)
                                     (ensure-gethash ',(car kv) (egraph-fsym-table ,egraph-var)
