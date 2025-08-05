@@ -2,7 +2,7 @@
     (:use :cl :alexandria)
   (:import-from :serapeum #:lret #:lret* #:-> #:string-prefix-p)
   (:import-from :bind #:bind)
-  (:export #:make-enode #:make-egraph #:enode-find #:list-enodes #:map-enodes
+  (:export #:make-enode #:make-egraph #:enode-find #:list-enodes
            #:egraph-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
            #:define-rewrite #:defrw #:make-term
@@ -19,7 +19,7 @@ Should only appear in reprensetative enode's PARENT slot.
 
 NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
   (nodes nil :type list)
-  (node-table (make-hash-table) :type hash-table)
+  (node-table nil :type (or null hash-table))
   (parents nil :type list)
   (n-parents 0 :type fixnum))
 
@@ -28,12 +28,17 @@ NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
 
 (defstruct (enode (:constructor %make-enode))
   "PARENT is either another enode in the same eclass, or an `eclass-info' if this
-enode is the representative of its own eclass."
+enode is the representative of its own eclass.
+
+HASH-CODE-AND-FLAGS store 1 in the lowest bit if the node is marked as
+non-canonical. `egraph-rebuild' trusts this information to avoid testing all
+term arguments for representativeness. Higher bits store a unique hash code."
   (term) (parent)
-  (hash-code (prog1 *hash-code*
-               (setf *hash-code*
-                     (logand (1+ *hash-code*) most-positive-fixnum)))
-   :type non-negative-fixnum))
+  (hash-code-and-flags
+   (prog1 (ash *hash-code* 1)
+     (setf *hash-code*
+           (logand (1+ *hash-code*) most-positive-fixnum)))
+   :type (unsigned-byte 64)))
 
 (defmethod print-object ((self enode) stream)
   (print-unreadable-object (self stream :type t :identity t)
@@ -54,12 +59,15 @@ enode is the representative of its own eclass."
       ;; Copied sb-c::mix
       (let* ((mul (logand 3622009729038463111 most-positive-fixnum))
              (xor (logand 608948948376289905 most-positive-fixnum))
-             (xy (logand (+ (* hash mul) (enode-hash-code i))
+             (xy (logand (+ (* hash mul) (ash (enode-hash-code-and-flags i) -1))
                          most-positive-fixnum)))
         (setq hash (logand (logxor xor xy (ash xy -5)) most-positive-fixnum))))
     hash))
 
 (defstruct egraph
+  "HASH-CONS stores all canonical enodes.
+
+CLASSES and NODE-TABLE are only up-to-date after `egraph-rebuild'."
   (hash-cons (make-hash-table :test 'term-equal :hash-function #'term-hash)
    :type hash-table)
   (classes (make-hash-table :test 'eq) :type hash-table)
@@ -86,10 +94,6 @@ enode is the representative of its own eclass."
 Only contains canonical enodes after `egraph-rebuild'."
   (eclass-info-nodes (enode-parent (enode-find enode))))
 
-(declaim (inline map-enodes))
-(defun map-enodes (fn enode)
-  (maphash fn (eclass-info-node-table (enode-parent (enode-find enode)))))
-
 (defun make-enode (egraph term)
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
     (ensure-gethash
@@ -97,7 +101,6 @@ Only contains canonical enodes after `egraph-rebuild'."
      (egraph-hash-cons egraph)
      (lret* ((eclass-info (%make-eclass-info))
              (enode (%make-enode :parent eclass-info :term term)))
-       (setf (gethash enode (egraph-classes egraph)) t)
        (setf (eclass-info-nodes eclass-info) (list enode))
        (dolist (arg (cdr term))
          (push enode (eclass-info-parents (enode-parent arg)))
@@ -114,9 +117,11 @@ Only contains canonical enodes after `egraph-rebuild'."
                  (eclass-info-n-parents py))
           (rotatef x y)
           (rotatef px py))
-        (setf (egraph-work-list egraph)
-              (nreconc (eclass-info-parents py) (egraph-work-list egraph))
-              (eclass-info-nodes px)
+        (dolist (parent (eclass-info-parents py))
+          (setf (enode-hash-code-and-flags parent)
+                (logior (enode-hash-code-and-flags parent) 1))
+          (push parent (egraph-work-list egraph)))
+        (setf (eclass-info-nodes px)
               (nreconc (eclass-info-nodes py) (eclass-info-nodes px)))
         (remhash y (egraph-classes egraph))
         (setf (enode-parent y) x)
@@ -132,28 +137,45 @@ Only contains canonical enodes after `egraph-rebuild'."
   (every #'enode-representative-p (cdr (enode-term enode))))
 
 (defun egraph-rebuild (egraph)
+  ;; Upward propagation
   (loop
     (let ((enode (pop (egraph-work-list egraph))))
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons egraph))
       (egraph-merge egraph (make-enode egraph (enode-term enode)) enode)))
-  (clrhash (egraph-node-table egraph))
+  ;; Build eclass index by collecting all representative enodes of canonical
+  ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
+  ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
+  ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
+  ;; `enode-representative-p'.
+  (clrhash (egraph-classes egraph))
   (maphash
-   (lambda (class ignore)
+   (lambda (ignore node)
      (declare (ignore ignore))
-     (let ((info (enode-parent class)))
-       (setf (eclass-info-nodes info)
-             (delete-if-not #'enode-canonical-p (eclass-info-nodes info))
-             (eclass-info-parents info)
-             (delete-if-not #'enode-canonical-p (eclass-info-parents info))
-             (eclass-info-n-parents info)
-             (length (eclass-info-parents info)))
-       (clrhash (eclass-info-node-table info))
-       (dolist (node (eclass-info-nodes info))
-         (let ((fsym (car (enode-term node))))
-           (push node (gethash fsym (eclass-info-node-table info)))
-           (push node (gethash fsym (egraph-node-table egraph)))))))
-   (egraph-classes egraph)))
+     (setf (gethash (enode-find node) (egraph-classes egraph)) egraph))
+   (egraph-hash-cons egraph))
+  ;; Build various node index
+  (clrhash (egraph-node-table egraph))
+  (flet ((enode-canonical-p (enode)
+           (zerop (logand (enode-hash-code-and-flags enode) 1))))
+    (maphash
+     (lambda (class ignore)
+       (declare (ignore ignore))
+       (let ((info (enode-parent class)))
+         (setf (eclass-info-nodes info)
+               (delete-if-not #'enode-canonical-p (eclass-info-nodes info))
+               (eclass-info-parents info)
+               (delete-if-not #'enode-canonical-p (eclass-info-parents info))
+               (eclass-info-n-parents info)
+               (length (eclass-info-parents info)))
+         (if-let (table (eclass-info-node-table info))
+           (clrhash table)
+           (setf (eclass-info-node-table info) (make-hash-table)))
+         (dolist (node (eclass-info-nodes info))
+           (let ((fsym (car (enode-term node))))
+             (push node (gethash fsym (eclass-info-node-table info)))
+             (push node (gethash fsym (egraph-node-table egraph)))))))
+     (egraph-classes egraph))))
 
 (defun check-egraph (egraph)
   "Various sanity check."
@@ -202,10 +224,11 @@ to Lisp variable."
                       (arg-vars (make-gensym-list (length (cdr pat)) fsym)))
                  ;; If we run this not right after rebuilding, var might be
                  ;; bound to non-representative enode, thus need the `enode-find'
-                 `(dolist (node (gethash ',fsym (eclass-info-node-table (enode-parent (enode-find ,var)))))
-                    (destructuring-bind ,arg-vars (cdr (enode-term node))
-                      (declare (ignorable ,@arg-vars))
-                      ,(expand-match (nconc (mapcar #'cons arg-vars (cdr pat)) rest) pat-var-alist cont)))))
+                 `(when-let (node-table (eclass-info-node-table (enode-parent (enode-find ,var))))
+                    (dolist (node (gethash ',fsym node-table))
+                      (destructuring-bind ,arg-vars (cdr (enode-term node))
+                        (declare (ignorable ,@arg-vars))
+                        ,(expand-match (nconc (mapcar #'cons arg-vars (cdr pat)) rest) pat-var-alist cont))))))
               ((var-p pat)
                (if-let (pat-var (assoc-value pat-var-alist pat))
                  `(when (eql ,var ,pat-var)
