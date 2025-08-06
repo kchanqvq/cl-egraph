@@ -64,7 +64,9 @@ term arguments for representativeness. Higher bits store a unique hash code."
     hash))
 
 (defstruct fsym-info
-  "NODES store all enodes with this function symbol.
+  "Index data for specific function symbol.
+
+NODES store all enodes with this function symbol.
 
 NODE-TABLE maps eclasses (i.e. representative enodes) to member enodes with this
 function symbol."
@@ -237,7 +239,9 @@ Only contains canonical enodes after `egraph-rebuild'."
         (t ;; Non-variable atoms are short hand for 0-arity function symbol
          (parse-pattern (list pat) eclass-var))))
 
-(defun expand-match (bound-vars subst-alist cont)
+(defun expand-match (bound-vars subst-alist cont-expr)
+  "Generate code that solves for SUBST-ALIST (as returned by `parse-pattern' then
+evaluate CONT-EXPR."
   (if subst-alist
       (bind ((((var fsym . arg-vars) . rest) subst-alist))
         (let ((lisp-arg-vars (mapcar (lambda (var) (if (member var bound-vars) (make-gensym fsym) var))
@@ -252,10 +256,12 @@ Only contains canonical enodes after `egraph-rebuild'."
                (when (and ,@ (mapcan (lambda (lisp-var var)
                                        (when (member var bound-vars) `((eql ,lisp-var ,var))))
                                      lisp-arg-vars arg-vars))
-                 ,(expand-match (union arg-vars bound-vars) rest cont))))))
-      (funcall cont)))
+                 ,(expand-match (union arg-vars bound-vars) rest cont-expr))))))
+      cont-expr))
 
 (defun expand-template (tmpl egraph-var)
+  "Generate code that creates an enode according to TMPL (rhs of rewrite rule) in
+EGRAPH-VAR."
   (labels ((process (tmpl)
              (cond ((consp tmpl)
                     `(let ((list (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
@@ -266,6 +272,12 @@ Only contains canonical enodes after `egraph-rebuild'."
     (process tmpl)))
 
 (defmacro define-rewrite (name egraph-var pat &body body)
+  "Define a rewrite rule function with NAME.
+
+The function accepts an argument and bind to EGRAPH-VAR, then match for PAT, and
+for each match evaluate BODY under the variable substitution. BODY should
+evaluate to a enode created in EGRAPH-VAR, which is merged with the matched
+enode."
   (bind ((((_ fsym . arg-vars) . rest-subst) (parse-pattern pat 'top-node))
          (*fsym-info-var-alist* nil)
          (fsym-info-var
@@ -273,8 +285,7 @@ Only contains canonical enodes after `egraph-rebuild'."
             (make-gensym fsym)))
          (match-body
           (expand-match arg-vars rest-subst
-                        (lambda ()
-                          `(egraph-merge ,egraph-var top-node (locally ,@body))))))
+                        `(egraph-merge ,egraph-var top-node (locally ,@body)))))
     `(defun ,name (,egraph-var)
        (let ,(mapcar (lambda (kv) `(,(cdr kv)
                                     (ensure-gethash ',(car kv) (egraph-fsym-table ,egraph-var)
@@ -286,6 +297,7 @@ Only contains canonical enodes after `egraph-rebuild'."
              ,match-body))))))
 
 (defmacro defrw (name lhs rhs &key (guard t))
+  "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
   `(define-rewrite ,name egraph ,lhs
      (when ,guard ,(expand-template rhs 'egraph))))
 
