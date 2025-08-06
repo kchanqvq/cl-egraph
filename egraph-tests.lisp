@@ -117,3 +117,26 @@
     (check-egraph egraph)
     (is (eq (enode-find a) (enode-find b)))
     (is (equal 'foo (greedy-extract egraph a #'ast-size)))))
+
+(defrw assoc-add (+ ?a (+ ?b ?c)) (+ (+ ?a ?b) ?c))
+(defrw assoc-mul (* ?a (* ?b ?c)) (* (* ?a ?b) ?c))
+
+(defun run-ac (egraph)
+  (egraph-rebuild egraph)
+  (let ((n (hash-table-count (egraph::egraph-hash-cons egraph))))
+    (loop
+      (commute-add egraph)
+      (assoc-add egraph)
+      (egraph-rebuild egraph)
+      (check-egraph egraph)
+      (let ((n-1 (hash-table-count (egraph::egraph-hash-cons egraph))))
+        (if (= n n-1)
+            (return)
+            (setq n n-1))))))
+
+(def-test ac ()
+  (let ((egraph (make-egraph)))
+    (make-term egraph '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 7))))))))
+    (run-ac egraph)
+    (is (= 6058 (hash-table-count (egraph::egraph-hash-cons egraph))))
+    (is (= 255 (hash-table-count (egraph::egraph-classes egraph))))))
