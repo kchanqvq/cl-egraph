@@ -135,9 +135,8 @@ Only contains canonical enodes after `egraph-rebuild'."
                 (logior (enode-hash-code-and-flags parent) 1))
           (push parent (egraph-work-list egraph)))
         (setf (eclass-info-nodes px)
-              (nreconc (eclass-info-nodes py) (eclass-info-nodes px)))
-        (remhash y (egraph-classes egraph))
-        (setf (enode-parent y) x)
+              (nreconc (eclass-info-nodes py) (eclass-info-nodes px))
+              (enode-parent y) x)
         nil))))
 
 (declaim (inline enode-representative-p enode-canonical-p))
