@@ -244,7 +244,10 @@ Only contains canonical enodes after `egraph-rebuild'."
 evaluate CONT-EXPR."
   (if subst-alist
       (bind ((((var fsym . arg-vars) . rest) subst-alist))
-        (let ((lisp-arg-vars (mapcar (lambda (var) (if (member var bound-vars) (make-gensym fsym) var))
+        (let ((lisp-arg-vars (mapcar (lambda (var)
+                                       (if (member var bound-vars)
+                                           (make-gensym fsym)
+                                           (progn (push var bound-vars) var)))
                                      arg-vars))
               (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
                                (make-gensym fsym)))
@@ -259,7 +262,8 @@ evaluate CONT-EXPR."
              (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
                (declare (ignorable ,@lisp-arg-vars))
                (when (and ,@ (mapcan (lambda (lisp-var var)
-                                       (when (member var bound-vars) `((eql ,lisp-var ,var))))
+                                       (when (and (var-p var) (not (var-p lisp-var)))
+                                         `((eql ,lisp-var ,var))))
                                      lisp-arg-vars arg-vars))
                  ,(expand-match (union arg-vars bound-vars) rest cont-expr))))))
       cont-expr))
