@@ -271,7 +271,7 @@ evaluate CONT-EXPR."
              (declare (ignorable ,@lisp-arg-vars))
              (when (and ,@ (mapcan (lambda (lisp-var var)
                                      (when (and (var-p var) (not (var-p lisp-var)))
-                                       `((eql ,lisp-var ,var))))
+                                       `((eq ,lisp-var ,var))))
                                    lisp-arg-vars arg-vars))
                ,(expand-match bound-vars rest cont-expr)))))
       cont-expr))
