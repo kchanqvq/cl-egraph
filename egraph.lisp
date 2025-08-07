@@ -267,7 +267,7 @@ evaluate CONT-EXPR."
                                        (when (and (var-p var) (not (var-p lisp-var)))
                                          `((eql ,lisp-var ,var))))
                                      lisp-arg-vars arg-vars))
-                 ,(expand-match (union arg-vars bound-vars) rest cont-expr))))))
+                 ,(expand-match bound-vars rest cont-expr))))))
       cont-expr))
 
 (defun expand-template (tmpl egraph-var)
