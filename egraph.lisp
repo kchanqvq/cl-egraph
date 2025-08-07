@@ -5,7 +5,7 @@
   (:export #:make-enode #:make-egraph #:enode-find #:list-enodes
            #:egraph-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
-           #:define-rewrite #:defrw #:make-term
+           #:define-rewrite #:defrw #:make-term #:run-rewrites
            #:greedy-extract))
 
 (in-package :egraph)
@@ -313,6 +313,31 @@ enode."
                  (make-enode egraph (cons (car term) (mapcar #'process (cdr term))))
                  (make-enode egraph (list term)))))
     (process term)))
+
+(declaim (inline egraph-n-enodes))
+(defun egraph-n-enodes (egraph)
+  (hash-table-count (egraph-hash-cons egraph)))
+
+(defun run-rewrites (egraph rules &key max-iter check max-enodes)
+  "Run RULES repeatly on EGRAPH until some stop criterion.
+
+Returns the reason for termination: one of :max-iter, :max-enodes, :saturate"
+  (let ((n-enodes (egraph-n-enodes egraph))
+        (n-iter 0))
+    (loop
+      (when (and max-iter (>= n-iter max-iter))
+        (return :max-iter))
+      (when (and max-enodes (>= n-enodes max-enodes))
+        (return :max-enodes))
+      (dolist (rule (ensure-list rules))
+        (funcall rule egraph))
+      (egraph-rebuild egraph)
+      (when check (check-egraph egraph))
+      (incf n-iter)
+      (let ((n-enodes-1 (egraph-n-enodes egraph)))
+        (if (= n-enodes n-enodes-1)
+            (return :saturate)
+            (setq n-enodes n-enodes-1))))))
 
 ;;; Extract
 
