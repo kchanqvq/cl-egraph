@@ -168,7 +168,7 @@ Only contains canonical enodes after `egraph-rebuild'."
   (maphash
    (lambda (ignore node)
      (declare (ignore ignore))
-     (setf (gethash (enode-find node) (egraph-classes egraph)) egraph))
+     (setf (gethash (enode-find node) (egraph-classes egraph)) t))
    (egraph-hash-cons egraph))
   ;; Build various node index
   (clrhash (egraph-fsym-table egraph))
@@ -241,7 +241,7 @@ Only contains canonical enodes after `egraph-rebuild'."
                            (unless (var-p arg)
                              (parse-pattern arg var)))
                          (cdr pat) arg-vars))))
-        ((var-p pat) (error "Single variable pattern not implemented."))
+        ((var-p pat) (error "Single variable pattern should not be handled here."))
         (t ;; Non-variable atoms are short hand for 0-arity function symbol
          (parse-pattern (list pat) eclass-var))))
 
@@ -294,16 +294,22 @@ The function accepts an argument and bind to EGRAPH-VAR, then match for PAT, and
 for each match evaluate BODY under the variable substitution. BODY should
 evaluate to a enode created in EGRAPH-VAR, which is merged with the matched
 enode."
-  (bind ((*fsym-info-var-alist* nil)
-         (match-body
-          (expand-match nil (parse-pattern pat 'top-node)
-                        `(egraph-merge ,egraph-var top-node (locally ,@body)))))
-    `(defun ,name (,egraph-var)
-       (let ,(mapcar (lambda (kv) `(,(cdr kv)
-                                    (ensure-gethash ',(car kv) (egraph-fsym-table ,egraph-var)
-                                                    (make-fsym-info))))
-                     *fsym-info-var-alist*)
-         ,match-body))))
+  (if (var-p pat) ; Special case for single variable PAT that scans all enodes
+      `(defun ,name (,egraph-var)
+         (maphash (lambda (ignore ,pat)
+                    (declare (ignore ignore))
+                    (egraph-merge ,egraph-var ,pat (locally ,@body)))
+                  (egraph-hash-cons ,egraph-var)))
+      (let* ((*fsym-info-var-alist* nil)
+             (match-body
+               (expand-match nil (parse-pattern pat 'top-node)
+                             `(egraph-merge ,egraph-var top-node (locally ,@body)))))
+        `(defun ,name (,egraph-var)
+           (let ,(mapcar (lambda (kv) `(,(cdr kv)
+                                        (ensure-gethash ',(car kv) (egraph-fsym-table ,egraph-var)
+                                                        (make-fsym-info))))
+                         *fsym-info-var-alist*)
+             ,match-body)))))
 
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."

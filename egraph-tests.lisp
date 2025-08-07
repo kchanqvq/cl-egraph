@@ -154,3 +154,14 @@
     (is (equal '(cos a) (greedy-extract egraph a #'ast-size)))
     (is (eq (enode-find b-1) (enode-find b)))
     (is (eq (enode-find c-1) (enode-find c)))))
+
+(defrw -add-0 ?a (+ ?a 0))
+
+(def-test single-var-pat ()
+  (let* ((egraph (make-egraph))
+         (a (make-term egraph 'a))
+         (b (make-term egraph '(+ (+ (+ a 0) 0) 0))))
+    (egraph-rebuild egraph)
+    (is (eq :saturate
+            (run-rewrites egraph '-add-0 :check t :max-iter 10)))
+    (is (eq (enode-find a) (enode-find b)))))
