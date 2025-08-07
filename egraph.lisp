@@ -63,6 +63,9 @@ term arguments for representativeness. Higher bits store a unique hash code."
         (setq hash (logand (logxor xor xy (ash xy -5)) most-positive-fixnum))))
     hash))
 
+(cl-custom-hash-table:define-custom-hash-table-constructor make-hash-cons
+  :test term-equal :hash-function term-hash)
+
 (defstruct fsym-info
   "Index data for specific function symbol.
 
@@ -79,8 +82,7 @@ eclass (i.e. representative enodes). FSYM-TABLE stores a `fsym-info' entry for
 every encountered function symbol.
 
 CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
-  (hash-cons (make-hash-table :test 'term-equal :hash-function #'term-hash)
-   :type hash-table)
+  (hash-cons (make-hash-cons) :type hash-table)
   (classes (make-hash-table :test 'eq) :type hash-table)
   (fsym-table (make-hash-table) :type hash-table)
   (work-list nil :type list))
