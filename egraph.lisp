@@ -317,6 +317,12 @@ enode."
 ;;; Extract
 
 (defun greedy-extract (egraph enode cost-fn)
+  "Greedy extract a term for ENODE from EGRAPH using COST-FN.
+
+COST-FN should accept 2 arguments: a function symbol and a list of costs for
+each argument eclass. It should return a number.
+
+ENODE can also be a list of enodes, and a list of terms will be returned."
   (let ((selections (make-hash-table))) ;; map eclass to (cost . enode)
     (loop
       (let (dirty)
@@ -342,4 +348,6 @@ enode."
                  (if (cdr term)
                      (cons (car term) (mapcar #'build-term (cdr term)))
                      (car term)))))
-      (build-term (enode-find enode)))))
+      (if (listp enode)
+          (mapcar (compose #'build-term #'enode-find) enode)
+          (build-term (enode-find enode))))))
