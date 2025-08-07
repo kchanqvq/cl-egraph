@@ -118,3 +118,39 @@
                           :check t :max-iter 10)))
     (is (= 6058 (hash-table-count (egraph::egraph-hash-cons egraph))))
     (is (= 255 (hash-table-count (egraph::egraph-classes egraph))))))
+
+(defrw sub-cancel (- ?a ?a) 0)
+(defrw add-2 (+ ?a ?a) (* 2 ?a))
+
+(def-test nonlinear ()
+  (let* ((egraph (make-egraph))
+         (a (make-term egraph '(- (+ a b) (+ b a))))
+         (b (make-term egraph '(- (+ a a) (* 2 a))))
+         (c (make-term egraph '(+ a (- b (* 1 b))))))
+    (egraph-rebuild egraph)
+    (is (eq :saturate
+            (run-rewrites egraph '(sub-cancel add-2
+                                   commute-add commute-mul add-0 mul-0 mul-1)
+                          :check t :max-iter 10)))
+    (is (equal 0 (greedy-extract egraph a #'ast-size)))
+    (is (equal 0 (greedy-extract egraph b #'ast-size)))
+    (is (equal 'a (greedy-extract egraph c #'ast-size)))))
+
+(defrw d-sin (d ?x (sin ?x)) (cos ?x))
+(defrw d-cos (d ?x (cos ?x)) (* -1 (sin ?x)))
+
+(def-test ground ()
+  (let* ((egraph (make-egraph))
+         (a (make-term egraph '(d a (sin a))))
+         (b (make-term egraph '(d (+ a b) (sin (+ b a)))))
+         (b-1 (make-term egraph '(cos (+ a b))))
+         (c (make-term egraph '(d a (d a (sin a)))))
+         (c-1 (make-term egraph '(* -1 (sin a)))))
+    (egraph-rebuild egraph)
+    (is (eq :saturate
+            (run-rewrites egraph '(d-sin d-cos
+                                   commute-add commute-mul add-0 mul-0 mul-1)
+                          :check t :max-iter 10)))
+    (is (equal '(cos a) (greedy-extract egraph a #'ast-size)))
+    (is (eq (enode-find b-1) (enode-find b)))
+    (is (eq (enode-find c-1) (enode-find c)))))

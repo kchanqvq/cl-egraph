@@ -151,6 +151,10 @@ Only contains canonical enodes after `egraph-rebuild'."
 
 (defun egraph-rebuild (egraph)
   ;; Upward propagation
+
+  ;; Note: we allow duplicates in `egraph-work-list'. Currently we don't bother
+  ;; `remove-duplicate' beforehand because doing such seem to actually slow
+  ;; things down a bit.
   (loop
     (let ((enode (pop (egraph-work-list egraph))))
       (unless enode (return))
@@ -210,7 +214,8 @@ Only contains canonical enodes after `egraph-rebuild'."
                    (length (remove-duplicates nodes :test 'equal :key #'enode-term)))
           (warn "Duplicates in ~a's enodes:~% ~a" class nodes)))
       (let ((parents (eclass-info-parents (enode-parent class))))
-        (unless (= (length parents)
+        ;; Currently we allow duplicates in parent list
+        #+nil (unless (= (length parents)
                    (length (remove-duplicates parents :test 'equal :key #'enode-term)))
           (warn "Duplicates in ~a's parent list:~% ~a" class parents))
         (dolist (node parents)
@@ -245,29 +250,30 @@ Only contains canonical enodes after `egraph-rebuild'."
   "Generate code that solves for SUBST-ALIST (as returned by `parse-pattern' then
 evaluate CONT-EXPR."
   (if subst-alist
-      (bind ((((var fsym . arg-vars) . rest) subst-alist))
-        (let ((lisp-arg-vars (mapcar (lambda (var)
-                                       (if (member var bound-vars)
-                                           (make-gensym fsym)
-                                           (progn (push var bound-vars) var)))
-                                     arg-vars))
-              (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                               (make-gensym fsym)))
-              (node-var (if (member var bound-vars) (make-gensym 'node) var)))
-          ;; Currently we use indexes (in `fsym-info') as single source of truth
-          ;; for matching, thus no-need to `enode-find' representative of VAR
-          ;; (even if VAR is non-rep, it once was when we built the index in
-          ;; `egraph-rebuild'
-          `(dolist (,node-var ,(if (member var bound-vars)
-                                   `(gethash ,var (fsym-info-node-table ,fsym-info-var))
-                                   `(fsym-info-nodes ,fsym-info-var)))
-             (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
-               (declare (ignorable ,@lisp-arg-vars))
-               (when (and ,@ (mapcan (lambda (lisp-var var)
-                                       (when (and (var-p var) (not (var-p lisp-var)))
-                                         `((eql ,lisp-var ,var))))
-                                     lisp-arg-vars arg-vars))
-                 ,(expand-match bound-vars rest cont-expr))))))
+      (bind ((((var fsym . arg-vars) . rest) subst-alist)
+             ((:flet lisp-var (var))
+              (if (member var bound-vars)
+                  (make-gensym fsym)
+                  (progn (push var bound-vars) var)))
+             (lisp-arg-vars (mapcar #'lisp-var arg-vars))
+             (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
+                              (make-gensym fsym)))
+             (lhs-bound-p (member var bound-vars))
+             (node-var (lisp-var var)))
+        ;; Currently we use indexes (in `fsym-info') as single source of truth
+        ;; for matching, thus no-need to `enode-find' representative of VAR
+        ;; (even if VAR is non-rep, it once was when we built the index in
+        ;; `egraph-rebuild'
+        `(dolist (,node-var ,(if lhs-bound-p
+                                 `(gethash ,var (fsym-info-node-table ,fsym-info-var))
+                                 `(fsym-info-nodes ,fsym-info-var)))
+           (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
+             (declare (ignorable ,@lisp-arg-vars))
+             (when (and ,@ (mapcan (lambda (lisp-var var)
+                                     (when (and (var-p var) (not (var-p lisp-var)))
+                                       `((eql ,lisp-var ,var))))
+                                   lisp-arg-vars arg-vars))
+               ,(expand-match bound-vars rest cont-expr)))))
       cont-expr))
 
 (defun expand-template (tmpl egraph-var)
@@ -314,15 +320,24 @@ enode."
                  (make-enode egraph (list term)))))
     (process term)))
 
-(declaim (inline egraph-n-enodes))
+(declaim (inline egraph-n-enodes egraph-n-eclasses))
+
 (defun egraph-n-enodes (egraph)
   (hash-table-count (egraph-hash-cons egraph)))
+
+(defun egraph-n-eclasses (egraph)
+  (hash-table-count (egraph-classes egraph)))
 
 (defun run-rewrites (egraph rules &key max-iter check max-enodes)
   "Run RULES repeatly on EGRAPH until some stop criterion.
 
-Returns the reason for termination: one of :max-iter, :max-enodes, :saturate"
+Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
+
+Note: this function does not call `egraph-rebuild' upfront. Particularly, if you
+have added some terms to EGRAPH, you MUST call `egraph-rebuild' before calling
+this function."
   (let ((n-enodes (egraph-n-enodes egraph))
+        (n-eclasses (egraph-n-eclasses egraph))
         (n-iter 0))
     (loop
       (when (and max-iter (>= n-iter max-iter))
@@ -334,10 +349,11 @@ Returns the reason for termination: one of :max-iter, :max-enodes, :saturate"
       (egraph-rebuild egraph)
       (when check (check-egraph egraph))
       (incf n-iter)
-      (let ((n-enodes-1 (egraph-n-enodes egraph)))
-        (if (= n-enodes n-enodes-1)
+      (let ((n-enodes-1 (egraph-n-enodes egraph))
+            (n-eclasses-1 (egraph-n-eclasses egraph)))
+        (if (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1))
             (return :saturate)
-            (setq n-enodes n-enodes-1))))))
+            (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1))))))
 
 ;;; Extract
 
