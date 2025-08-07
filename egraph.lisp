@@ -247,7 +247,7 @@ Only contains canonical enodes after `egraph-rebuild'."
          (parse-pattern (list pat) eclass-var))))
 
 (defun expand-match (bound-vars subst-alist cont-expr)
-  "Generate code that solves for SUBST-ALIST (as returned by `parse-pattern' then
+  "Generate code that solves for SUBST-ALIST (as returned by `parse-pattern') then
 evaluate CONT-EXPR."
   (if subst-alist
       (bind ((((var fsym . arg-vars) . rest) subst-alist)
