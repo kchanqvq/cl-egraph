@@ -10,7 +10,7 @@
 
 (in-package :egraph)
 
-;;; E-graph
+;;; E-graph data structure
 
 (defstruct (eclass-info (:constructor %make-eclass-info))
   "Metadata for the eclass.
@@ -247,11 +247,16 @@ evaluate CONT-EXPR."
         (let ((lisp-arg-vars (mapcar (lambda (var) (if (member var bound-vars) (make-gensym fsym) var))
                                      arg-vars))
               (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                               (make-gensym fsym))))
-          ;; If we run this not right after rebuilding, var might be
-          ;; bound to non-representative enode, thus need the `enode-find'
-          `(dolist (node (gethash (enode-find ,var) (fsym-info-node-table ,fsym-info-var)))
-             (destructuring-bind ,lisp-arg-vars (cdr (enode-term node))
+                               (make-gensym fsym)))
+              (node-var (if (member var bound-vars) (make-gensym 'node) var)))
+          ;; Currently we use indexes (in `fsym-info') as single source of truth
+          ;; for matching, thus no-need to `enode-find' representative of VAR
+          ;; (even if VAR is non-rep, it once was when we built the index in
+          ;; `egraph-rebuild'
+          `(dolist (,node-var ,(if (member var bound-vars)
+                                   `(gethash ,var (fsym-info-node-table ,fsym-info-var))
+                                   `(fsym-info-nodes ,fsym-info-var)))
+             (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
                (declare (ignorable ,@lisp-arg-vars))
                (when (and ,@ (mapcan (lambda (lisp-var var)
                                        (when (member var bound-vars) `((eql ,lisp-var ,var))))
@@ -278,23 +283,16 @@ The function accepts an argument and bind to EGRAPH-VAR, then match for PAT, and
 for each match evaluate BODY under the variable substitution. BODY should
 evaluate to a enode created in EGRAPH-VAR, which is merged with the matched
 enode."
-  (bind ((((_ fsym . arg-vars) . rest-subst) (parse-pattern pat 'top-node))
-         (*fsym-info-var-alist* nil)
-         (fsym-info-var
-          (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-            (make-gensym fsym)))
+  (bind ((*fsym-info-var-alist* nil)
          (match-body
-          (expand-match arg-vars rest-subst
+          (expand-match nil (parse-pattern pat 'top-node)
                         `(egraph-merge ,egraph-var top-node (locally ,@body)))))
     `(defun ,name (,egraph-var)
        (let ,(mapcar (lambda (kv) `(,(cdr kv)
                                     (ensure-gethash ',(car kv) (egraph-fsym-table ,egraph-var)
                                                     (make-fsym-info))))
                      *fsym-info-var-alist*)
-         (dolist (top-node (fsym-info-nodes ,fsym-info-var))
-           (destructuring-bind ,arg-vars (cdr (enode-term top-node))
-             (declare (ignorable ,@arg-vars))
-             ,match-body))))))
+         ,match-body))))
 
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
