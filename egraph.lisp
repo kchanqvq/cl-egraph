@@ -165,18 +165,16 @@ Only contains canonical enodes after `egraph-rebuild'."
   ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
   ;; `enode-representative-p'.
   (clrhash (egraph-classes egraph))
-  (maphash
-   (lambda (ignore node)
-     (declare (ignore ignore))
+  (maphash-values
+   (lambda (node)
      (setf (gethash (enode-find node) (egraph-classes egraph)) t))
    (egraph-hash-cons egraph))
   ;; Build various node index
   (clrhash (egraph-fsym-table egraph))
   (flet ((enode-canonical-p (enode)
            (zerop (logand (enode-hash-code-and-flags enode) 1))))
-    (maphash
-     (lambda (class ignore)
-       (declare (ignore ignore))
+    (maphash-keys
+     (lambda (class)
        (let ((info (enode-parent class)))
          (setf (eclass-info-nodes info)
                (delete-if-not #'enode-canonical-p (eclass-info-nodes info))
@@ -191,16 +189,27 @@ Only contains canonical enodes after `egraph-rebuild'."
              (push node (fsym-info-nodes fsym-info))))))
      (egraph-classes egraph))))
 
+(defun hash-table-keys-difference (table-1 table-2)
+  (let ((result nil))
+    (maphash-keys (lambda (class)
+                    (unless (gethash class table-2)
+                      (push class result)))
+                  table-1)
+    result))
+
 (defun check-egraph (egraph)
   "Various sanity check."
   (declare (optimize (debug 3)))
-  (let ((classes (make-hash-table)))
+  (let ((classes (make-hash-table))
+        (n-parent-list 0)
+        (n-parent-list-distinct 0))
     (dolist (enode (hash-table-values (egraph-hash-cons egraph)))
       (setf (gethash (enode-find enode) classes) t))
     (format t "~&There're ~a eclasses.~%" (hash-table-count classes))
-    (when-let (diff (set-exclusive-or (hash-table-keys classes)
-                                      (hash-table-keys (egraph-classes egraph))))
-      (error "Difference between classes slot and actual eclasses:~% ~a" diff))
+    (when-let (diff (hash-table-keys-difference classes (egraph-classes egraph)))
+      (error "Missing eclasses:~% ~a" diff))
+    (when-let (diff (hash-table-keys-difference (egraph-classes egraph) classes))
+      (error "Extra eclasses:~% ~a" diff))
     (dolist (class (hash-table-keys classes))
       (let ((nodes (list-enodes class)))
         (dolist (node nodes)
@@ -213,15 +222,18 @@ Only contains canonical enodes after `egraph-rebuild'."
                    (length (remove-duplicates nodes :test 'equal :key #'enode-term)))
           (warn "Duplicates in ~a's enodes:~% ~a" class nodes)))
       (let ((parents (eclass-info-parents (enode-parent class))))
-        ;; Currently we allow duplicates in parent list
-        #+nil (unless (= (length parents)
-                   (length (remove-duplicates parents :test 'equal :key #'enode-term)))
-          (warn "Duplicates in ~a's parent list:~% ~a" class parents))
         (dolist (node parents)
           (unless (enode-canonical-p node)
             (error "Non canonical ~a on ~a's parent list" node class))
           (unless (member class (cdr (enode-term node)))
-            (error "Extra parent link from ~a to ~a" class node)))))))
+            (error "Extra parent link from ~a to ~a" class node)))
+        ;; Currently we allow duplicates in parent list
+        (incf n-parent-list (length parents))
+        (incf n-parent-list-distinct (length (remove-duplicates parents)))))
+    (let ((n-dup (- n-parent-list n-parent-list-distinct)))
+      (unless (zerop n-dup)
+        (format t "~a/~a (~,2$%) elements in parent list are duplicates.~%"
+                n-dup n-parent-list (* 100 (/ n-dup n-parent-list)))))))
 
 ;;; E-match/rewrite compiler
 
@@ -373,9 +385,8 @@ ENODE can also be a list of enodes, and a list of terms will be returned."
   (let ((selections (make-hash-table))) ;; map eclass to (cost . enode)
     (loop
       (let (dirty)
-        (maphash
-         (lambda (class ignore)
-           (declare (ignore ignore))
+        (maphash-keys
+         (lambda (class)
            (let ((selection (gethash class selections)))
              (dolist (enode (list-enodes class))
                (let* ((term (enode-term enode))
