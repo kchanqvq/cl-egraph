@@ -231,11 +231,14 @@ Only contains canonical enodes after `egraph-rebuild'."
 
 (defvar *fsym-info-var-alist*)
 
+(defun gensym-1 (thing)
+  (make-gensym (prin1-to-string thing)))
+
 (defun parse-pattern (pat eclass-var)
   "Convert PAT into a list of the form ((eclass-var fsym arg-var...) ...)."
   (cond ((consp pat)
          (let* ((fsym (car pat))
-                (arg-vars (mapcar (lambda (arg) (if (var-p arg) arg (make-gensym fsym))) (cdr pat))))
+                (arg-vars (mapcar (lambda (arg) (if (var-p arg) arg (gensym-1 fsym))) (cdr pat))))
            (cons (list* eclass-var fsym arg-vars)
                  (mapcan (lambda (arg var)
                            (unless (var-p arg)
@@ -252,11 +255,11 @@ evaluate CONT-EXPR."
       (bind ((((var fsym . arg-vars) . rest) subst-alist)
              ((:flet lisp-var (var))
               (if (member var bound-vars)
-                  (make-gensym fsym)
+                  (gensym-1 fsym)
                   (progn (push var bound-vars) var)))
              (lisp-arg-vars (mapcar #'lisp-var arg-vars))
              (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                              (make-gensym fsym)))
+                              (gensym-1 fsym)))
              (lhs-bound-p (member var bound-vars))
              (node-var (lisp-var var)))
         ;; Currently we use indexes (in `fsym-info') as single source of truth
@@ -296,10 +299,8 @@ evaluate to a enode created in EGRAPH-VAR, which is merged with the matched
 enode."
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
       `(defun ,name (,egraph-var)
-         (maphash (lambda (ignore ,pat)
-                    (declare (ignore ignore))
-                    (egraph-merge ,egraph-var ,pat (locally ,@body)))
-                  (egraph-hash-cons ,egraph-var)))
+         (dolist (,pat (hash-table-values (egraph-hash-cons ,egraph-var)))
+           (egraph-merge ,egraph-var ,pat (locally ,@body))))
       (let* ((*fsym-info-var-alist* nil)
              (match-body
                (expand-match nil (parse-pattern pat 'top-node)
