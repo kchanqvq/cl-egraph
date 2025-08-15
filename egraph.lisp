@@ -3,10 +3,11 @@
   (:import-from :serapeum #:lret #:lret* #:-> #:string-prefix-p)
   (:import-from :bind #:bind)
   (:export #:make-enode #:make-egraph #:enode-find #:list-enodes
-           #:egraph-merge #:egraph-rebuild
+           #:*egraph* #:egraph-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
-           #:define-rewrite #:defrw #:make-term #:run-rewrites
-           #:make-analysis-info
+           #:egraph-n-enodes #:egraph-n-eclasses
+           #:do-matches #:defrw #:make-term #:run-rewrites
+           #:make-analysis-info #:get-analysis-data
            #:greedy-extract))
 
 (in-package :egraph)
@@ -80,6 +81,7 @@ function symbol."
 
 (defstruct analysis-info
   "Data for e-analysis."
+  (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type function)
   (merge (required-argument :merge) :type function)
   (modify (constantly nil) :type function)
@@ -97,6 +99,9 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (fsym-table (make-hash-table) :type hash-table)
   (work-list nil :type list)
   (analysis-info-list nil :type list))
+
+(defvar *egraph*)
+(setf (documentation '*egraph* 'variable) "Current egraph under operation.")
 
 (defun make-egraph (&key analyses)
   (let ((analyses (ensure-list analyses)))
@@ -135,7 +140,7 @@ Only contains canonical enodes after `egraph-rebuild'."
                        (svref (eclass-info-analysis-data-vec (enode-parent arg)) i))
                      (cdr term)))))
 
-(defun merge-analysis-data (egraph eclass analysis-info data)
+(defun merge-analysis-data (eclass analysis-info data)
   (let ((data-changed nil)
         (class-info (enode-parent eclass))
         (i (analysis-info-data-index analysis-info)))
@@ -145,34 +150,40 @@ Only contains canonical enodes after `egraph-rebuild'."
                    data))
     (when data-changed
       (push eclass (analysis-info-work-list analysis-info))
-      (funcall (analysis-info-modify analysis-info) egraph eclass
+      (funcall (analysis-info-modify analysis-info) eclass
                (svref (eclass-info-analysis-data-vec class-info) i)))))
 
-(defun modify-analysis-data (egraph eclass analysis-info)
-  (funcall (analysis-info-modify analysis-info) egraph eclass
+(defun modify-analysis-data (eclass analysis-info)
+  (funcall (analysis-info-modify analysis-info) eclass
            (svref (eclass-info-analysis-data-vec (enode-parent eclass))
                   (analysis-info-data-index analysis-info))))
 
-(defun make-enode (egraph term)
+(-> get-analysis-data (enode symbol) t)
+(defun get-analysis-data (enode name)
+  (svref (eclass-info-analysis-data-vec (enode-parent (enode-find enode)))
+         (analysis-info-data-index
+          (find name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name))))
+
+(defun make-enode (term)
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
-    (or (gethash term (egraph-hash-cons egraph))
+    (or (gethash term (egraph-hash-cons *egraph*))
         (lret ((enode (%make-enode :term term)))
           (setf (enode-parent enode)
                 (%make-eclass-info :nodes (list enode)
                                    :analysis-data-vec
                                    (map 'vector (lambda (info)
                                                   (make-analysis-data enode info))
-                                        (egraph-analysis-info-list egraph))))
+                                        (egraph-analysis-info-list *egraph*))))
           (dolist (arg (cdr term))
             (push enode (eclass-info-parents (enode-parent arg)))
             (incf (eclass-info-n-parents (enode-parent arg))))
-          (setf (gethash term (egraph-hash-cons egraph)) enode)
-          (map nil (lambda (info) (modify-analysis-data egraph enode info))
-               (egraph-analysis-info-list egraph))))))
+          (setf (gethash term (egraph-hash-cons *egraph*)) enode)
+          (map nil (lambda (info) (modify-analysis-data enode info))
+               (egraph-analysis-info-list *egraph*))))))
 
 
-(-> egraph-merge (egraph enode enode) null)
-(defun egraph-merge (egraph x y)
+(-> egraph-merge (enode enode) null)
+(defun egraph-merge (x y)
   (let ((x (enode-find x))
         (y (enode-find y)))
     (unless (eq x y)
@@ -185,12 +196,12 @@ Only contains canonical enodes after `egraph-rebuild'."
         (dolist (parent (eclass-info-parents py))
           (setf (enode-hash-code-and-flags parent)
                 (logior (enode-hash-code-and-flags parent) 1))
-          (push parent (egraph-work-list egraph)))
+          (push parent (egraph-work-list *egraph*)))
         (setf (eclass-info-nodes px)
               (nreconc (eclass-info-nodes py) (eclass-info-nodes px))
               (enode-parent y) x)
-        (dolist (info (egraph-analysis-info-list egraph))
-          (merge-analysis-data egraph x info
+        (dolist (info (egraph-analysis-info-list *egraph*))
+          (merge-analysis-data x info
                                (svref (eclass-info-analysis-data-vec py)
                                       (analysis-info-data-index info))))
         nil))))
@@ -204,28 +215,28 @@ Only contains canonical enodes after `egraph-rebuild'."
 (defun enode-canonical-p (enode)
   (every #'enode-representative-p (cdr (enode-term enode))))
 
-(defun egraph-rebuild (egraph)
+(defun egraph-rebuild ()
   ;; Upward propagation
 
   ;; Note: we allow duplicates in `egraph-work-list'. Currently we don't bother
   ;; `remove-duplicate' beforehand because doing such seem to actually slow
   ;; things down a bit.
   (loop
-    (let ((enode (pop (egraph-work-list egraph))))
+    (let ((enode (pop (egraph-work-list *egraph*))))
       (unless enode (return))
-      (remhash (enode-term enode) (egraph-hash-cons egraph))
-      (egraph-merge egraph (make-enode egraph (enode-term enode)) enode)))
+      (remhash (enode-term enode) (egraph-hash-cons *egraph*))
+      (egraph-merge (make-enode (enode-term enode)) enode)))
   ;; Build eclass index by collecting all representative enodes of canonical
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
   ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
   ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
   ;; `enode-representative-p'.
-  (clrhash (egraph-classes egraph))
+  (clrhash (egraph-classes *egraph*))
   (maphash-values (lambda (node)
-                    (setf (gethash (enode-find node) (egraph-classes egraph)) t))
-                  (egraph-hash-cons egraph))
+                    (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
+                  (egraph-hash-cons *egraph*))
   ;; Build various node index
-  (clrhash (egraph-fsym-table egraph))
+  (clrhash (egraph-fsym-table *egraph*))
   (flet ((enode-canonical-p (enode)
            (zerop (logand (enode-hash-code-and-flags enode) 1))))
     (maphash-keys (lambda (class)
@@ -237,11 +248,11 @@ Only contains canonical enodes after `egraph-rebuild'."
                             (eclass-info-n-parents info)
                             (length (eclass-info-parents info)))
                       (dolist (node (eclass-info-nodes info))
-                        (let ((fsym-info (ensure-gethash (car (enode-term node)) (egraph-fsym-table egraph)
+                        (let ((fsym-info (ensure-gethash (car (enode-term node)) (egraph-fsym-table *egraph*)
                                                          (make-fsym-info))))
                           (push node (gethash class (fsym-info-node-table fsym-info)))
                           (push node (fsym-info-nodes fsym-info))))))
-                  (egraph-classes egraph)))
+                  (egraph-classes *egraph*)))
   ;; Update analysis
   (map nil (lambda (analysis-info)
              (loop
@@ -250,9 +261,9 @@ Only contains canonical enodes after `egraph-rebuild'."
                  (let ((info (enode-parent enode)))
                    (when (eclass-info-p info)
                      (dolist (parent (eclass-info-parents info))
-                       (merge-analysis-data egraph parent analysis-info
+                       (merge-analysis-data parent analysis-info
                                             (make-analysis-data parent analysis-info))))))))
-       (egraph-analysis-info-list egraph)))
+       (egraph-analysis-info-list *egraph*)))
 
 (defun hash-table-keys-difference (table-1 table-2)
   (let ((results nil))
@@ -262,18 +273,18 @@ Only contains canonical enodes after `egraph-rebuild'."
                   table-1)
     results))
 
-(defun check-egraph (egraph)
+(defun check-egraph ()
   "Various sanity check."
   (declare (optimize (debug 3)))
   (let ((classes (make-hash-table))
         (n-parent-list 0)
         (n-parent-list-distinct 0))
-    (dolist (enode (hash-table-values (egraph-hash-cons egraph)))
+    (dolist (enode (hash-table-values (egraph-hash-cons *egraph*)))
       (setf (gethash (enode-find enode) classes) t))
     (format t "~&There're ~a eclasses.~%" (hash-table-count classes))
-    (when-let (diff (hash-table-keys-difference classes (egraph-classes egraph)))
+    (when-let (diff (hash-table-keys-difference classes (egraph-classes *egraph*)))
       (error "Missing eclasses:~% ~a" diff))
-    (when-let (diff (hash-table-keys-difference (egraph-classes egraph) classes))
+    (when-let (diff (hash-table-keys-difference (egraph-classes *egraph*) classes))
       (error "Extra eclasses:~% ~a" diff))
     (dolist (class (hash-table-keys classes))
       (let ((nodes (list-enodes class)))
@@ -355,53 +366,50 @@ evaluate CONT-EXPR."
                ,(expand-match bound-vars rest cont-expr)))))
       cont-expr))
 
-(defun expand-template (tmpl egraph-var)
-  "Generate code that creates an enode according to TMPL (rhs of rewrite rule) in
-EGRAPH-VAR."
+(defun expand-template (tmpl)
+  "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
   (labels ((process (tmpl)
              (cond ((consp tmpl)
                     `(let ((list (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
                        (declare (dynamic-extent list))
-                       (make-enode ,egraph-var list)))
+                       (make-enode list)))
                    ((var-p tmpl) tmpl)
                    (t (process (list tmpl))))))
     (process tmpl)))
 
-(defmacro define-rewrite (name egraph-var pat &body body)
-  "Define a rewrite rule function with NAME.
+(defmacro do-matches (pat &body body)
+  "Evaluate BODY for every PAT match in EGRAPH.
 
-The function accepts an argument and bind to EGRAPH-VAR, then match for PAT, and
-for each match evaluate BODY under the variable substitution. BODY should
-evaluate to a enode created in EGRAPH-VAR, which is merged with the matched
-enode."
+BODY is evaluated with variables in PAT bound to matched eclasses."
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
-      `(defun ,name (,egraph-var)
-         (dolist (,pat (hash-table-values (egraph-hash-cons ,egraph-var)))
-           (egraph-merge ,egraph-var ,pat (locally ,@body))))
+      `(dolist (,pat (hash-table-values (egraph-hash-cons *egraph*)))
+         (egraph-merge ,pat (locally ,@body)))
       (let* ((*fsym-info-var-alist* nil)
              (match-body
                (expand-match nil (parse-pattern pat 'top-node)
-                             `(egraph-merge ,egraph-var top-node (locally ,@body)))))
-        `(defun ,name (,egraph-var)
-           (let ,(mapcar (lambda (kv) `(,(cdr kv)
-                                        (ensure-gethash ',(car kv) (egraph-fsym-table ,egraph-var)
-                                                        (make-fsym-info))))
-                         *fsym-info-var-alist*)
-             ,match-body)))))
+                             `(egraph-merge top-node (locally ,@body)))))
+        `(let ,(mapcar (lambda (kv) `(,(cdr kv)
+                                      (ensure-gethash ',(car kv) (egraph-fsym-table *egraph*)
+                                                      (make-fsym-info))))
+                       *fsym-info-var-alist*)
+           ,match-body))))
+
+(defvar *max-enodes* nil)
 
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
-  `(define-rewrite ,name egraph ,lhs
-     (when ,guard ,(expand-template rhs 'egraph))))
+  `(defun ,name ()
+     (do-matches ,lhs
+       (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
+         (return-from ,name))
+       (when ,guard ,(expand-template rhs)))))
 
 ;;; Utils
 
-(defun make-term (egraph term)
-  (labels ((process (term)
-             (if (consp term)
-                 (make-enode egraph (cons (car term) (mapcar #'process (cdr term))))
-                 (make-enode egraph (list term)))))
-    (process term)))
+(defun make-term (term)
+  (if (consp term)
+      (make-enode (cons (car term) (mapcar #'make-term (cdr term))))
+      (make-enode (list term))))
 
 (declaim (inline egraph-n-enodes egraph-n-eclasses))
 
@@ -411,37 +419,37 @@ enode."
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (egraph rules &key max-iter check max-enodes)
-  "Run RULES repeatly on EGRAPH until some stop criterion.
+(defun run-rewrites (rules &key max-iter check ((:max-enodes *max-enodes*)))
+  "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
 
 Note: this function does not call `egraph-rebuild' upfront. Particularly, if you
 have added some terms to EGRAPH, you MUST call `egraph-rebuild' before calling
 this function."
-  (let ((n-enodes (egraph-n-enodes egraph))
-        (n-eclasses (egraph-n-eclasses egraph))
+  (let ((n-enodes (egraph-n-enodes *egraph*))
+        (n-eclasses (egraph-n-eclasses *egraph*))
         (n-iter 0))
     (loop
       (when (and max-iter (>= n-iter max-iter))
         (return :max-iter))
-      (when (and max-enodes (>= n-enodes max-enodes))
+      (when (and *max-enodes* (>= n-enodes *max-enodes*))
         (return :max-enodes))
       (dolist (rule (ensure-list rules))
-        (funcall rule egraph))
-      (egraph-rebuild egraph)
-      (when check (check-egraph egraph))
+        (funcall rule))
+      (egraph-rebuild)
+      (when check (check-egraph))
       (incf n-iter)
-      (let ((n-enodes-1 (egraph-n-enodes egraph))
-            (n-eclasses-1 (egraph-n-eclasses egraph)))
+      (let ((n-enodes-1 (egraph-n-enodes *egraph*))
+            (n-eclasses-1 (egraph-n-eclasses *egraph*)))
         (if (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1))
             (return :saturate)
             (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1))))))
 
 ;;; Extract
 
-(defun greedy-extract (egraph enode cost-fn)
-  "Greedy extract a term for ENODE from EGRAPH using COST-FN.
+(defun greedy-extract (enode cost-fn)
+  "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
 
 COST-FN should accept 2 arguments: a function symbol and a list of costs for
 each argument eclass. It should return a number.
@@ -463,7 +471,7 @@ ENODE can also be a list of enodes, and a list of terms will be returned."
                                 (setq selection (cons new-cost enode)
                                       dirty t))))
                           (setf (gethash class selections) selection)))
-                      (egraph-classes egraph))
+                      (egraph-classes *egraph*))
         (unless dirty (return))))
     (labels ((build-term (class)
                (let ((term (enode-term (cdr (gethash class selections)))))
