@@ -165,3 +165,30 @@
     (is (eq :saturate
             (run-rewrites egraph '-add-0 :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))))
+
+(defun make-const-analysis ()
+  (make-analysis-info
+   :make (lambda (fsym args)
+           (if args
+               (when (every #'identity args)
+                 (apply fsym args))
+               (when (numberp fsym)
+                 fsym)))
+   :merge (lambda (x y)
+            (if (and (not x) y)
+                (values y t)
+                (values x nil)))
+   :modify (lambda (egraph node data)
+             (when data
+               (egraph-merge egraph node (make-enode egraph (list data)))))))
+
+(def-test analysis.const ()
+  (let* ((egraph (make-egraph :analyses (make-const-analysis)))
+         (a (make-term egraph '(+ 3 (+ 2 a))))
+         (b (make-term egraph '(+ a 5)))
+         (c (make-term egraph '(+ 2 (* 3 5)))))
+    (egraph-rebuild egraph)
+    (is (eq :saturate
+            (run-rewrites egraph '(commute-add commute-mul assoc-add assoc-mul) :check t :max-iter 10)))
+    (is (eq (enode-find a) (enode-find b)))
+    (is (equal 17 (greedy-extract egraph c #'ast-size)))))
