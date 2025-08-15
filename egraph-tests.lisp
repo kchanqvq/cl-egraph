@@ -1,6 +1,6 @@
 (uiop:define-package :egraph/tests
     (:use :cl :egraph)
-  (:import-from :fiveam #:def-suite* #:def-test #:is))
+  (:import-from :fiveam #:def-suite* #:def-test #:is #:in-suite))
 
 (in-package :egraph/tests)
 
