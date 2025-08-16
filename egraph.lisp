@@ -401,7 +401,7 @@ BODY is evaluated with variables in PAT bound to matched eclasses."
   `(defun ,name ()
      (do-matches ,lhs
        (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
-         (return-from ,name))
+         (throw 'stop :max-enodes))
        (when ,guard ,(expand-template rhs)))))
 
 ;;; Utils
@@ -430,21 +430,23 @@ this function."
   (let ((n-enodes (egraph-n-enodes *egraph*))
         (n-eclasses (egraph-n-eclasses *egraph*))
         (n-iter 0))
-    (loop
-      (when (and max-iter (>= n-iter max-iter))
-        (return :max-iter))
-      (when (and *max-enodes* (>= n-enodes *max-enodes*))
-        (return :max-enodes))
-      (dolist (rule (ensure-list rules))
-        (funcall rule))
-      (egraph-rebuild)
-      (when check (check-egraph))
-      (incf n-iter)
-      (let ((n-enodes-1 (egraph-n-enodes *egraph*))
-            (n-eclasses-1 (egraph-n-eclasses *egraph*)))
-        (if (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1))
-            (return :saturate)
-            (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1))))))
+    (catch 'stop
+      (loop
+        (when (and max-iter (>= n-iter max-iter))
+          (throw 'stop :max-iter))
+        (when (and *max-enodes* (>= n-enodes *max-enodes*))
+          (throw 'stop :max-enodes))
+        (unwind-protect
+             (dolist (rule (ensure-list rules))
+               (funcall rule))
+          (egraph-rebuild))
+        (when check (check-egraph))
+        (incf n-iter)
+        (let ((n-enodes-1 (egraph-n-enodes *egraph*))
+              (n-eclasses-1 (egraph-n-eclasses *egraph*)))
+          (if (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1))
+              (return :saturate)
+              (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1)))))))
 
 ;;; Extract
 
