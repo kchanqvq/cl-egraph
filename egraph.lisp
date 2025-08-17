@@ -2,8 +2,8 @@
     (:use :cl :alexandria)
   (:import-from :serapeum #:lret #:lret* #:-> #:string-prefix-p)
   (:import-from :bind #:bind)
-  (:export #:make-enode #:make-egraph #:enode-find #:list-enodes
-           #:*egraph* #:egraph-merge #:egraph-rebuild
+  (:export #:make-enode #:make-egraph #:list-enodes
+           #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses
            #:do-matches #:defrw #:make-term #:run-rewrites
@@ -182,8 +182,8 @@ Only contains canonical enodes after `egraph-rebuild'."
                (egraph-analysis-info-list *egraph*))))))
 
 
-(-> egraph-merge (enode enode) null)
-(defun egraph-merge (x y)
+(-> enode-merge (enode enode) null)
+(defun enode-merge (x y)
   (let ((x (enode-find x))
         (y (enode-find y)))
     (unless (eq x y)
@@ -225,7 +225,7 @@ Only contains canonical enodes after `egraph-rebuild'."
     (let ((enode (pop (egraph-work-list *egraph*))))
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons *egraph*))
-      (egraph-merge (make-enode (enode-term enode)) enode)))
+      (enode-merge (make-enode (enode-term enode)) enode)))
   ;; Build eclass index by collecting all representative enodes of canonical
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
   ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
@@ -377,17 +377,18 @@ evaluate CONT-EXPR."
                    (t (process (list tmpl))))))
     (process tmpl)))
 
-(defmacro do-matches (pat &body body)
+(defmacro do-matches ((top-node-var pat) &body body)
   "Evaluate BODY for every PAT match in EGRAPH.
 
-BODY is evaluated with variables in PAT bound to matched eclasses."
+BODY is evaluated with variables in PAT bound to matched eclasses and
+TOP-NODE-VAR bound to the enode matching PAT."
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
       `(dolist (,pat (hash-table-values (egraph-hash-cons *egraph*)))
-         (egraph-merge ,pat (locally ,@body)))
+         (let ((,top-node-var ,pat)) ,@body))
       (let* ((*fsym-info-var-alist* nil)
              (match-body
-               (expand-match nil (parse-pattern pat 'top-node)
-                             `(egraph-merge top-node (locally ,@body)))))
+               (expand-match nil (parse-pattern pat top-node-var)
+                             `(locally ,@body))))
         `(let ,(mapcar (lambda (kv) `(,(cdr kv)
                                       (ensure-gethash ',(car kv) (egraph-fsym-table *egraph*)
                                                       (make-fsym-info))))
@@ -399,10 +400,11 @@ BODY is evaluated with variables in PAT bound to matched eclasses."
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
   `(defun ,name ()
-     (do-matches ,lhs
+     (do-matches (top-node ,lhs)
        (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
          (throw 'stop :max-enodes))
-       (when ,guard ,(expand-template rhs)))))
+       (when ,guard
+         (enode-merge top-node ,(expand-template rhs))))))
 
 ;;; Utils
 
