@@ -23,6 +23,52 @@
 (declaim (inline pow))
 (defun pow (x y) (expt x y))
 
+(defun make-var-analysis ()
+  (make-analysis-info
+   :name 'var
+   :make (lambda (fsym args)
+           (when (and (not args) (symbolp fsym))
+             fsym))
+   :merge (lambda (x y)
+            (if (and (not x) y)
+                (values y t)
+                (values x nil)))))
+
+(defvar *math-base-rules*
+  '(COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
+    DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV))
+
+(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
+(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
+                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
+                                                             (vc (get-analysis-data ?c 'var)))
+                                        (not (eq vx vc)))))
+(defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
+(defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
+(defrw d-sin (d ?x (sin ?x)) (cos ?x))
+(defrw d-cos (d ?x (cos ?x)) (* -1 (sin ?x)))
+(defrw d-ln (d ?x (ln ?x)) (/ 1 ?x) :guard (not (eql 0 (get-analysis-data ?x 'const))))
+(defrw d-pow (d ?x (pow ?f ?g)) (* (pow ?f ?g) (+ (* (d ?x ?f) (/ ?g ?f)) (* (d ?x ?g) (ln ?f))))
+  :guard (and (not (eql 0 (get-analysis-data ?f 'const)))
+              (not (eql 0 (get-analysis-data ?g 'const)))))
+
+(defvar *math-diff-rules* '(D-VAR D-CONST D-ADD D-MUL D-SIN D-COS D-LN D-POW))
+
+(defrw i-one (i 1 ?x) ?x)
+(defrw i-pow-const (i (pow ?x ?c) ?x)
+  (/ (pow ?x (+ ?c 1)) (+ ?c 1)) :guard (get-analysis-data ?c 'const))
+(defrw i-cos (i (cos ?x) ?x) (sin ?x))
+(defrw i-sin (i (sin ?x) ?x) (* -1 (cos ?x)))
+(defrw i-sum (i (+ ?f ?g) ?x) (+ (i ?f ?x) (i ?g ?x)))
+(defrw i-dif (i (- ?f ?g) ?x) (- (i ?f ?x) (i ?g ?x)))
+(defrw i-parts (i (* ?a ?b) ?x) (- (* ?a (i ?b ?x)) (i (* (d ?x ?a) (i ?b ?x)) ?x)))
+
+(defvar *math-integral-rules* '(I-ONE I-POW-CONST I-COS I-SIN I-SUM I-DIF I-PARTS))
+
+(defun ast-size-no-d-or-i (fsym arg-costs)
+  (when (every #'identity arg-costs)
+    (+ (if (member fsym '(d i)) 100 1) (reduce #'+ arg-costs))))
+
 (def-test math.simplify-root ()
   (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis))))
          (a (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2)
@@ -50,3 +96,19 @@
                   :max-enodes 75000)
     (is (eq (enode-find (make-term '(+ (+ (* x x) (* 4 x)) 3)))
             (enode-find a)))))
+
+(def-test math.diff-power-simple ()
+  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+         (a (make-term '(d x (pow x 3)))))
+    (run-rewrites (append *math-base-rules* *math-diff-rules*)
+                  :max-enodes 75000)
+    (is (eq (enode-find (make-term '(* 3 (pow x 2)))) (enode-find a)))))
+
+;; The following does not work for now, probably due to we're not doing backoff
+;; scheduling yet, and AC rules are starving other rules
+#+nil (def-test math.diff-power-harder ()
+  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+         (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))))
+    (run-rewrites (append *math-base-rules* *math-diff-rules*)
+                  :max-enodes 100000)
+    (is (eq (enode-find (make-term '(* x (- (* 3 x) 14)))) (enode-find a)))))
