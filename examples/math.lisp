@@ -74,26 +74,14 @@
          (a (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2)
                                      (/ (- 1 (sqrt five)) 2))))))
     (egraph-rebuild)
-    (run-rewrites '(commute-add commute-mul assoc-add assoc-mul
-                    sub-canon div-canon add-0 mul-0 mul-1 -add-0 -mul-1
-                    sub-cancel div-cancel
-                    distribute factor
-                    pow-mul pow-0 pow-1 pow-2 pow-recip
-                    recip-mul-div)
-                  :max-enodes 75000)
+    (run-rewrites *math-base-rules* :max-enodes 75000)
     (is (equal '(/ 1 (sqrt five)) (greedy-extract a #'ast-size)))))
 
 (def-test math.simplify-factor ()
   (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis))))
          (a (make-term '(* (+ x 3) (+ x 1)))))
     (egraph-rebuild)
-    (run-rewrites '(commute-add commute-mul assoc-add assoc-mul
-                    sub-canon div-canon add-0 mul-0 mul-1 -add-0 -mul-1
-                    sub-cancel div-cancel
-                    distribute factor
-                    pow-mul pow-0 pow-1 pow-2 pow-recip
-                    recip-mul-div)
-                  :max-enodes 75000)
+    (run-rewrites *math-base-rules* :max-enodes 75000)
     (is (eq (enode-find (make-term '(+ (+ (* x x) (* 4 x)) 3)))
             (enode-find a)))))
 
