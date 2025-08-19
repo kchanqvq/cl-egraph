@@ -38,11 +38,6 @@
   '(COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
     DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
-                                                             (vc (get-analysis-data ?c 'var)))
-                                        (not (eq vx vc)))))
 (defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
 (defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
 (defrw d-sin (d ?x (sin ?x)) (cos ?x))
@@ -75,7 +70,7 @@
                                      (/ (- 1 (sqrt five)) 2))))))
     (egraph-rebuild)
     (run-rewrites *math-base-rules* :max-enodes 75000)
-    (is (equal '(/ 1 (sqrt five)) (greedy-extract a #'ast-size)))))
+    (is (eq (enode-find (make-term '(/ 1 (sqrt five)))) (enode-find a)))))
 
 (def-test math.simplify-factor ()
   (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis))))

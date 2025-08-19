@@ -178,7 +178,7 @@ Only contains canonical enodes after `egraph-rebuild'."
             (push enode (eclass-info-parents (enode-parent arg)))
             (incf (eclass-info-n-parents (enode-parent arg))))
           (setf (gethash term (egraph-hash-cons *egraph*)) enode)
-          (map nil (lambda (info) (modify-analysis-data enode info))
+          (map nil (lambda (info) (modify-analysis-data (enode-find enode) info))
                (egraph-analysis-info-list *egraph*))))))
 
 
@@ -226,6 +226,17 @@ Only contains canonical enodes after `egraph-rebuild'."
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons *egraph*))
       (enode-merge (make-enode (enode-term enode)) enode)))
+  ;; Update analysis
+  (map nil (lambda (analysis-info)
+             (loop
+               (let ((enode (pop (analysis-info-work-list analysis-info))))
+                 (unless enode (return))
+                 (let ((info (enode-parent enode)))
+                   (when (eclass-info-p info)
+                     (dolist (parent (eclass-info-parents info))
+                       (merge-analysis-data (enode-find parent) analysis-info
+                                            (make-analysis-data parent analysis-info))))))))
+       (egraph-analysis-info-list *egraph*))
   ;; Build eclass index by collecting all representative enodes of canonical
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
   ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
@@ -252,18 +263,7 @@ Only contains canonical enodes after `egraph-rebuild'."
                                                          (make-fsym-info))))
                           (push node (gethash class (fsym-info-node-table fsym-info)))
                           (push node (fsym-info-nodes fsym-info))))))
-                  (egraph-classes *egraph*)))
-  ;; Update analysis
-  (map nil (lambda (analysis-info)
-             (loop
-               (let ((enode (pop (analysis-info-work-list analysis-info))))
-                 (unless enode (return))
-                 (let ((info (enode-parent enode)))
-                   (when (eclass-info-p info)
-                     (dolist (parent (eclass-info-parents info))
-                       (merge-analysis-data parent analysis-info
-                                            (make-analysis-data parent analysis-info))))))))
-       (egraph-analysis-info-list *egraph*)))
+                  (egraph-classes *egraph*))))
 
 (defun hash-table-keys-difference (table-1 table-2)
   (let ((results nil))
@@ -383,8 +383,11 @@ evaluate CONT-EXPR."
 BODY is evaluated with variables in PAT bound to matched eclasses and
 TOP-NODE-VAR bound to the enode matching PAT."
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
-      `(dolist (,pat (hash-table-values (egraph-hash-cons *egraph*)))
-         (let ((,top-node-var ,pat)) ,@body))
+      `(maphash-values
+        (lambda (fsym-info)
+          (dolist (,pat (fsym-info-nodes fsym-info))
+            (let ((,top-node-var ,pat)) ,@body)))
+        (egraph-fsym-table *egraph*))
       (let* ((*fsym-info-var-alist* nil)
              (match-body
                (expand-match nil (parse-pattern pat top-node-var)

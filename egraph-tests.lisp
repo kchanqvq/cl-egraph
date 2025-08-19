@@ -193,3 +193,34 @@
             (run-rewrites '(commute-add commute-mul assoc-add assoc-mul) :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))
     (is (equal 17 (greedy-extract c #'ast-size)))))
+
+(defun make-var-analysis ()
+  (make-analysis-info
+   :name 'var
+   :make (lambda (fsym args)
+           (when (and (not args) (symbolp fsym))
+             fsym))
+   :merge (lambda (x y)
+            (if (and (not x) y)
+                (values y t)
+                (values x nil)))))
+
+(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
+(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
+                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
+                                                             (vc (get-analysis-data ?c 'var)))
+                                        (not (eq vx vc)))))
+
+(def-test analysis.multiple.1 ()
+  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+         (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
+    (egraph-rebuild)
+    (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
+    (is (eq (enode-find (make-term 1)) (enode-find a)))))
+
+(def-test analysis.multiple.2 ()
+  (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis) (make-var-analysis))))
+         (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
+    (egraph-rebuild)
+    (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
+    (is (eq (enode-find (make-term 1)) (enode-find a)))))
