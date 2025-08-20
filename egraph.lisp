@@ -47,11 +47,14 @@ term arguments for representativeness. Higher bits store a unique hash code."
     (format stream "~:[~;REP ~]~a" (enode-representative-p self) (enode-term self))))
 
 (defun term-equal (x y)
+  (unless (eql (car x) (car y))
+    (return-from term-equal nil))
+  (setq x (cdr x) y (cdr y))
   (loop
+    (unless (or x y) (return))
     (unless (eq (car x) (car y))
       (return-from term-equal nil))
-    (setq x (cdr x) y (cdr y))
-    (unless (or x y) (return)))
+    (setq x (cdr x) y (cdr y)))
   t)
 
 (defun term-hash (x)
@@ -130,7 +133,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
 Only contains canonical enodes after `egraph-rebuild'."
   (eclass-info-nodes (enode-parent (enode-find enode))))
 
-(declaim (inline make-analysis-data merge-analysis-data modify-analysis-data))
+(declaim (inline make-analysis-data modify-analysis-data merge-analysis-data))
 
 (defun make-analysis-data (enode analysis-info)
   (let ((term (enode-term enode))
@@ -139,6 +142,11 @@ Only contains canonical enodes after `egraph-rebuild'."
              (mapcar (lambda (arg)
                        (svref (eclass-info-analysis-data-vec (enode-parent arg)) i))
                      (cdr term)))))
+
+(defun modify-analysis-data (eclass analysis-info)
+  (funcall (analysis-info-modify analysis-info) eclass
+           (svref (eclass-info-analysis-data-vec (enode-parent eclass))
+                  (analysis-info-data-index analysis-info))))
 
 (defun merge-analysis-data (eclass analysis-info data)
   (let ((data-changed nil)
@@ -150,9 +158,7 @@ Only contains canonical enodes after `egraph-rebuild'."
                    data))
     (when data-changed
       (push eclass (analysis-info-work-list analysis-info)))
-    (funcall (analysis-info-modify analysis-info) eclass
-             (svref (eclass-info-analysis-data-vec (enode-parent eclass))
-                    (analysis-info-data-index analysis-info)))))
+    (modify-analysis-data eclass analysis-info)))
 
 (-> get-analysis-data (enode symbol) t)
 (defun get-analysis-data (enode name)
@@ -173,7 +179,10 @@ Only contains canonical enodes after `egraph-rebuild'."
           (dolist (arg (cdr term))
             (push enode (eclass-info-parents (enode-parent arg)))
             (incf (eclass-info-n-parents (enode-parent arg))))
-          (setf (gethash term (egraph-hash-cons *egraph*)) enode)))))
+          (setf (gethash term (egraph-hash-cons *egraph*)) enode)
+          (map nil (lambda (info)
+                     (modify-analysis-data (enode-find enode) info))
+               (egraph-analysis-info-list *egraph*))))))
 
 
 (-> enode-merge (enode enode) null)
