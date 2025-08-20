@@ -181,7 +181,12 @@
                 (values x nil)))
    :modify (lambda (node data)
              (when data
-               (enode-merge node (make-enode (list data)))))))
+               (let* ((term (list data))
+                      (const (make-enode term)))
+                 (declare (dynamic-extent term))
+                 (enode-merge node const)
+                 (setf (egraph::eclass-info-nodes (egraph::enode-parent (enode-find node)))
+                       (list const)))))))
 
 (def-test analysis.const ()
   (let* ((*egraph* (make-egraph :analyses (make-const-analysis)))

@@ -149,14 +149,10 @@ Only contains canonical enodes after `egraph-rebuild'."
                    (svref (eclass-info-analysis-data-vec class-info) i)
                    data))
     (when data-changed
-      (push eclass (analysis-info-work-list analysis-info))
-      (funcall (analysis-info-modify analysis-info) eclass
-               (svref (eclass-info-analysis-data-vec class-info) i)))))
-
-(defun modify-analysis-data (eclass analysis-info)
-  (funcall (analysis-info-modify analysis-info) eclass
-           (svref (eclass-info-analysis-data-vec (enode-parent eclass))
-                  (analysis-info-data-index analysis-info))))
+      (push eclass (analysis-info-work-list analysis-info)))
+    (funcall (analysis-info-modify analysis-info) eclass
+             (svref (eclass-info-analysis-data-vec (enode-parent eclass))
+                    (analysis-info-data-index analysis-info)))))
 
 (-> get-analysis-data (enode symbol) t)
 (defun get-analysis-data (enode name)
@@ -177,9 +173,7 @@ Only contains canonical enodes after `egraph-rebuild'."
           (dolist (arg (cdr term))
             (push enode (eclass-info-parents (enode-parent arg)))
             (incf (eclass-info-n-parents (enode-parent arg))))
-          (setf (gethash term (egraph-hash-cons *egraph*)) enode)
-          (map nil (lambda (info) (modify-analysis-data (enode-find enode) info))
-               (egraph-analysis-info-list *egraph*))))))
+          (setf (gethash term (egraph-hash-cons *egraph*)) enode)))))
 
 
 (-> enode-merge (enode enode) null)
@@ -226,30 +220,31 @@ Only contains canonical enodes after `egraph-rebuild'."
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons *egraph*))
       (enode-merge (make-enode (enode-term enode)) enode)))
-  ;; Update analysis
-  (map nil (lambda (analysis-info)
-             (loop
-               (let ((enode (pop (analysis-info-work-list analysis-info))))
-                 (unless enode (return))
-                 (let ((info (enode-parent enode)))
-                   (when (eclass-info-p info)
-                     (dolist (parent (eclass-info-parents info))
-                       (merge-analysis-data (enode-find parent) analysis-info
-                                            (make-analysis-data parent analysis-info))))))))
-       (egraph-analysis-info-list *egraph*))
-  ;; Build eclass index by collecting all representative enodes of canonical
-  ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
-  ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
-  ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
-  ;; `enode-representative-p'.
-  (clrhash (egraph-classes *egraph*))
-  (maphash-values (lambda (node)
-                    (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
-                  (egraph-hash-cons *egraph*))
-  ;; Build various node index
-  (clrhash (egraph-fsym-table *egraph*))
   (flet ((enode-canonical-p (enode)
            (zerop (logand (enode-hash-code-and-flags enode) 1))))
+    ;; Update analysis
+    (map nil (lambda (analysis-info)
+               (loop
+                 (let ((enode (pop (analysis-info-work-list analysis-info))))
+                   (unless enode (return))
+                   (let ((info (enode-parent enode)))
+                     (when (eclass-info-p info)
+                       (dolist (parent (eclass-info-parents info))
+                         (when (enode-canonical-p parent)
+                           (merge-analysis-data (enode-find parent) analysis-info
+                                                (make-analysis-data parent analysis-info)))))))))
+         (egraph-analysis-info-list *egraph*))
+    ;; Build eclass index by collecting all representative enodes of canonical
+    ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
+    ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
+    ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
+    ;; `enode-representative-p'.
+    (clrhash (egraph-classes *egraph*))
+    (maphash-values (lambda (node)
+                      (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
+                    (egraph-hash-cons *egraph*))
+    ;; Build various node index
+    (clrhash (egraph-fsym-table *egraph*))
     (maphash-keys (lambda (class)
                     (let ((info (enode-parent class)))
                       (setf (eclass-info-nodes info)
