@@ -172,7 +172,8 @@
    :make (lambda (fsym args)
            (if args
                (when (every #'identity args)
-                 (apply fsym args))
+                 ;; Guard against things like division by zero
+                 (ignore-errors (apply fsym args)))
                (when (numberp fsym)
                  fsym)))
    :merge (lambda (x y)

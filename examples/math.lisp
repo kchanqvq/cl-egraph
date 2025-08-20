@@ -1,6 +1,6 @@
 (in-package :egraph/tests)
 
-(in-suite :egraph)
+(def-suite* math :in :egraph)
 
 (defrw sub-canon (- ?a ?b) (+ ?a (* -1 ?b)))
 (defrw div-canon (/ ?a ?b) (* ?a (pow ?b -1)) :guard (not (eql 0 (get-analysis-data ?b 'const))))
@@ -60,38 +60,43 @@
 
 (defvar *math-integral-rules* '(I-ONE I-POW-CONST I-COS I-SIN I-SUM I-DIF I-PARTS))
 
+(defvar *math-rules* (append *math-base-rules* *math-diff-rules* *math-integral-rules*))
+
 (defun ast-size-no-d-or-i (fsym arg-costs)
   (when (every #'identity arg-costs)
     (+ (if (member fsym '(d i)) 100 1) (reduce #'+ arg-costs))))
 
-(def-test math.simplify-root ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis))))
-         (a (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2)
-                                     (/ (- 1 (sqrt five)) 2))))))
-    (egraph-rebuild)
-    (run-rewrites *math-base-rules* :max-enodes 75000)
-    (is (eq (enode-find (make-term '(/ 1 (sqrt five)))) (enode-find a)))))
+(defmacro def-math-test (name () lhs rhs)
+  `(def-test ,name ()
+     (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+            (lhs (make-term ',lhs)))
+       (egraph-rebuild)
+       (run-rewrites *math-rules* :max-enodes 5000)
+       (is (eq (enode-find (make-term ',rhs)) (enode-find lhs))))))
 
-(def-test math.simplify-factor ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis))))
-         (a (make-term '(* (+ x 3) (+ x 1)))))
-    (egraph-rebuild)
-    (run-rewrites *math-base-rules* :max-enodes 75000)
-    (is (eq (enode-find (make-term '(+ (+ (* x x) (* 4 x)) 3)))
-            (enode-find a)))))
+(def-math-test math.simplify-root ()
+  (/ 1 (- (/ (+ 1 (sqrt five)) 2)
+          (/ (- 1 (sqrt five)) 2)))
+  (/ 1 (sqrt five)))
 
-(def-test math.diff-power-simple ()
+(def-math-test math.simplify-factor ()
+  (* (+ x 3) (+ x 1)) (+ (+ (* x x) (* 4 x)) 3))
+
+(def-math-test math.diff-power-simple ()
+  (d x (pow x 3)) (* 3 (pow x 2)))
+
+(def-test math.diff-power-harder ()
   (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
-         (a (make-term '(d x (pow x 3)))))
-    (run-rewrites (append *math-base-rules* *math-diff-rules*)
-                  :max-enodes 75000)
-    (is (eq (enode-find (make-term '(* 3 (pow x 2)))) (enode-find a)))))
+         (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
+         (b (make-term '(* x (- (* 3 x) 14)))))
+    (run-rewrites *math-rules* :max-enodes 5000)
+    (is (eq (enode-find b) (enode-find a)))))
 
-;; The following does not work for now, probably due to we're not doing backoff
-;; scheduling yet, and AC rules are starving other rules
-#+nil (def-test math.diff-power-harder ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
-         (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))))
-    (run-rewrites (append *math-base-rules* *math-diff-rules*)
-                  :max-enodes 100000)
-    (is (eq (enode-find (make-term '(* x (- (* 3 x) 14)))) (enode-find a)))))
+(def-math-test math.integral-part.1 ()
+  (i (* x (cos x)) x) (+ (* x (sin x)) (cos x)))
+
+(def-math-test math.integral-part.2 ()
+  (i (* (cos x) x) x) (+ (* x (sin x)) (cos x)))
+
+(def-math-test math.integral-part.3 ()
+  (i (ln x) x) (- (* x (ln x)) x))

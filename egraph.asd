@@ -15,5 +15,7 @@
   :serial t
   :depends-on (:egraph
                :fiveam)
-  :components ((:file "egraph-tests"))
+  :components ((:file "egraph-tests")
+               (:module "examples"
+                :components ((:file "math"))))
   :perform (test-op (o c) (symbol-call :fiveam '#:run! :egraph)))
