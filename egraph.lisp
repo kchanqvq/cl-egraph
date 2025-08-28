@@ -32,15 +32,15 @@ NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
   "PARENT is either another enode in the same eclass, or an `eclass-info' if this
 enode is the representative of its own eclass.
 
-HASH-CODE-AND-FLAGS store 1 in the lowest bit if the node is marked as
-non-canonical. `egraph-rebuild' trusts this information to avoid testing all
-term arguments for representativeness. Higher bits store a unique hash code."
+Set CANONICAL-FLAG to NIL to mark the node as non-canonical. `egraph-rebuild'
+trusts this information to avoid testing all term arguments for
+representativeness."
   (term) (parent)
-  (hash-code-and-flags
-   (prog1 (ash *hash-code* 1)
-     (setf *hash-code*
-           (logand (1+ *hash-code*) most-positive-fixnum)))
-   :type (unsigned-byte 64)))
+  (hash-code
+   (setf *hash-code*
+         (logand (1+ *hash-code*) most-positive-fixnum))
+   :type fixnum)
+  (canonical-flag t :type boolean))
 
 (defmethod print-object ((self enode) stream)
   (print-unreadable-object (self stream :type t :identity t)
@@ -64,8 +64,7 @@ term arguments for representativeness. Higher bits store a unique hash code."
       ;; Copied sb-c::mix
       (let* ((mul (logand 3622009729038463111 most-positive-fixnum))
              (xor (logand 608948948376289905 most-positive-fixnum))
-             (xy (logand (+ (* hash mul) (ash (enode-hash-code-and-flags i) -1))
-                         most-positive-fixnum)))
+             (xy (logand (+ (* hash mul) (enode-hash-code i)) most-positive-fixnum)))
         (setq hash (logand (logxor xor xy (ash xy -5)) most-positive-fixnum))))
     hash))
 
@@ -197,8 +196,7 @@ Only contains canonical enodes after `egraph-rebuild'."
           (rotatef x y)
           (rotatef px py))
         (dolist (parent (eclass-info-parents py))
-          (setf (enode-hash-code-and-flags parent)
-                (logior (enode-hash-code-and-flags parent) 1))
+          (setf (enode-canonical-flag parent) nil)
           (push parent (egraph-work-list *egraph*)))
         (setf (eclass-info-nodes px)
               (nreconc (eclass-info-nodes py) (eclass-info-nodes px))
@@ -229,45 +227,43 @@ Only contains canonical enodes after `egraph-rebuild'."
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons *egraph*))
       (enode-merge (make-enode (enode-term enode)) enode)))
-  (flet ((enode-canonical-p (enode)
-           (zerop (logand (enode-hash-code-and-flags enode) 1))))
-    ;; Update analysis
-    (map nil (lambda (analysis-info)
-               (loop
-                 (let ((enode (pop (analysis-info-work-list analysis-info))))
-                   (unless enode (return))
-                   (let ((info (enode-parent enode)))
-                     (when (eclass-info-p info)
-                       (dolist (parent (eclass-info-parents info))
-                         (when (enode-canonical-p parent)
-                           (merge-analysis-data (enode-find parent) analysis-info
-                                                (make-analysis-data parent analysis-info)))))))))
-         (egraph-analysis-info-list *egraph*))
-    ;; Build eclass index by collecting all representative enodes of canonical
-    ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
-    ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
-    ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
-    ;; `enode-representative-p'.
-    (clrhash (egraph-classes *egraph*))
-    (maphash-values (lambda (node)
-                      (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
-                    (egraph-hash-cons *egraph*))
-    ;; Build various node index
-    (clrhash (egraph-fsym-table *egraph*))
-    (maphash-keys (lambda (class)
-                    (let ((info (enode-parent class)))
-                      (setf (eclass-info-nodes info)
-                            (delete-if-not #'enode-canonical-p (eclass-info-nodes info))
-                            (eclass-info-parents info)
-                            (delete-if-not #'enode-canonical-p (eclass-info-parents info))
-                            (eclass-info-n-parents info)
-                            (length (eclass-info-parents info)))
-                      (dolist (node (eclass-info-nodes info))
-                        (let ((fsym-info (ensure-gethash (car (enode-term node)) (egraph-fsym-table *egraph*)
-                                                         (make-fsym-info))))
-                          (push node (gethash class (fsym-info-node-table fsym-info)))
-                          (push node (fsym-info-nodes fsym-info))))))
-                  (egraph-classes *egraph*))))
+  ;; Update analysis
+  (map nil (lambda (analysis-info)
+             (loop
+               (let ((enode (pop (analysis-info-work-list analysis-info))))
+                 (unless enode (return))
+                 (let ((info (enode-parent enode)))
+                   (when (eclass-info-p info)
+                     (dolist (parent (eclass-info-parents info))
+                       (when (enode-canonical-flag parent)
+                         (merge-analysis-data (enode-find parent) analysis-info
+                                              (make-analysis-data parent analysis-info)))))))))
+       (egraph-analysis-info-list *egraph*))
+  ;; Build eclass index by collecting all representative enodes of canonical
+  ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
+  ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
+  ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
+  ;; `enode-representative-p'.
+  (clrhash (egraph-classes *egraph*))
+  (maphash-values (lambda (node)
+                    (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
+                  (egraph-hash-cons *egraph*))
+  ;; Build various node index
+  (clrhash (egraph-fsym-table *egraph*))
+  (maphash-keys (lambda (class)
+                  (let ((info (enode-parent class)))
+                    (setf (eclass-info-nodes info)
+                          (delete-if-not #'enode-canonical-flag (eclass-info-nodes info))
+                          (eclass-info-parents info)
+                          (delete-if-not #'enode-canonical-flag (eclass-info-parents info))
+                          (eclass-info-n-parents info)
+                          (length (eclass-info-parents info)))
+                    (dolist (node (eclass-info-nodes info))
+                      (let ((fsym-info (ensure-gethash (car (enode-term node)) (egraph-fsym-table *egraph*)
+                                                       (make-fsym-info))))
+                        (push node (gethash class (fsym-info-node-table fsym-info)))
+                        (push node (fsym-info-nodes fsym-info))))))
+                (egraph-classes *egraph*)))
 
 (defun hash-table-keys-difference (table-1 table-2)
   (let ((results nil))
