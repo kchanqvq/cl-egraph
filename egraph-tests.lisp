@@ -173,7 +173,13 @@
            (if args
                (when (every #'identity args)
                  ;; Guard against things like division by zero
-                 (ignore-errors (apply fsym args)))
+                 (ignore-errors
+                  (let* ((result (apply fsym args)))
+                    ;; Coerce integral float into integer
+                    (if (floatp result)
+                        (multiple-value-bind (int frac) (truncate result (float 1.0 result))
+                          (if (zerop frac) int result))
+                        result))))
                (when (numberp fsym)
                  fsym)))
    :merge (lambda (x y)
