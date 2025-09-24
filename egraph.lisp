@@ -165,8 +165,14 @@ Only contains canonical enodes after `egraph-rebuild'."
          (analysis-info-data-index
           (find name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name))))
 
+(defvar *ac-symbols* (make-hash-table))
+
 (defun make-enode (term)
-  (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
+  (let* ((fsym (car term))
+         (args (mapcar #'enode-find (cdr term)))
+         (term (if (gethash fsym *ac-symbols*)
+                   (cons fsym (sort args #'< :key #'enode-hash-code))
+                   (cons fsym args))))
     (or (gethash term (egraph-hash-cons *egraph*))
         (lret ((enode (%make-enode :term term)))
           (setf (enode-parent enode)
@@ -317,6 +323,10 @@ Only contains canonical enodes after `egraph-rebuild'."
   (typecase object
     (symbol (string-prefix-p "?" (symbol-name object)))))
 
+(defun rail-var-p (object)
+  (typecase object
+    (symbol (string-prefix-p "??" (symbol-name object)))))
+
 (defvar *fsym-info-var-alist*)
 
 (defun gensym-1 (thing)
@@ -335,6 +345,22 @@ Only contains canonical enodes after `egraph-rebuild'."
         ((var-p pat) (error "Single variable pattern should not be handled here."))
         (t ;; Non-variable atoms are short hand for 0-arity function symbol
          (parse-pattern (list pat) eclass-var))))
+
+(defmacro ac-bind ((&rest vars) term &body body)
+  (let ((rest-var (lastcar vars)))
+    (assert (rail-var-p rest-var))
+    (labels ((make-loop (term-var vars)
+               (if vars
+                   (with-gensyms (tail)
+                     `(let ((,tail ,term-var)
+                            (,rest-var ,rest-var))
+                        (loop
+                          (let ((,(car vars) (pop ,tail)))
+                            (unless ,(car vars) (return))
+                            ,(make-loop tail (cdr vars))
+                            (push ,(car vars) ,rest-var)))))
+                   `(let ((,rest-var (revappend ,rest-var ,term-var))) ,@body))))
+      `(let (,rest-var) ,(make-loop term (butlast vars))))))
 
 (defun expand-match (bound-vars subst-alist cont-expr)
   "Generate code that solves for SUBST-ALIST (as returned by `parse-pattern') then
@@ -357,7 +383,8 @@ evaluate CONT-EXPR."
         `(dolist (,node-var ,(if lhs-bound-p
                                  `(gethash ,var (fsym-info-node-table ,fsym-info-var))
                                  `(fsym-info-nodes ,fsym-info-var)))
-           (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
+           (,(if (gethash fsym *ac-symbols*) 'ac-bind 'destructuring-bind)
+            ,lisp-arg-vars (cdr (enode-term ,node-var))
              (declare (ignorable ,@lisp-arg-vars))
              (when (and ,@ (mapcan (lambda (lisp-var var)
                                      (when (and (var-p var) (not (var-p lisp-var)))
@@ -368,12 +395,34 @@ evaluate CONT-EXPR."
 
 (defun expand-template (tmpl)
   "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
-  (labels ((process (tmpl)
+  (labels ((process-args (args)
+             (cond ((rail-var-p (car args))
+                    `(append ,(car args) ,(process-args (cdr args))))
+                   (args `(cons ,(process (car args)) ,(process-args (cdr args))))
+                   (t nil)))
+           (process (tmpl)
              (cond ((consp tmpl)
-                    `(let ((list (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
+                    `(let ((list (cons ',(car tmpl) ,(process-args (cdr tmpl)))))
                        (declare (dynamic-extent list))
                        (make-enode list)))
                    ((var-p tmpl) tmpl)
+                   (t (process (list tmpl))))))
+    (process tmpl)))
+
+(defun expand-cost (tmpl)
+  (labels ((process-args (args)
+             (cond ((rail-var-p (car args))
+                    `(append (mapcar (rcurry #'get-analysis-data *cost-analysis*)
+                                     ,(car args))
+                             ,(process-args (cdr args))))
+                   (args `(cons ,(process (car args)) ,(process-args (cdr args))))
+                   (t nil)))
+           (process (tmpl)
+             (cond ((consp tmpl)
+                    `(let ((list ,(process-args (cdr tmpl))))
+                       (declare (dynamic-extent list))
+                       (funcall *cost-fn* ',(car tmpl) list)))
+                   ((var-p tmpl) `(get-analysis-data ,tmpl *cost-analysis*))
                    (t (process (list tmpl))))))
     (process tmpl)))
 
@@ -400,13 +449,19 @@ TOP-NODE-VAR bound to the enode matching PAT."
 
 (defvar *max-enodes* nil)
 
+(defvar *cost-fn* nil)
+(defvar *cost-analysis* nil)
+(defvar *max-cost* nil)
+
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
   `(defun ,name ()
      (do-matches (top-node ,lhs)
        (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
          (throw 'stop :max-enodes))
-       (when ,guard
+       (when (and (or (not *max-cost*)
+                      (<= ,(expand-cost rhs) *max-cost*))
+                  ,guard)
          (enode-merge top-node ,(expand-template rhs))))))
 
 ;;; Utils
