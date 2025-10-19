@@ -1,10 +1,12 @@
 (uiop:define-package :egraph/tests
-    (:use :cl :egraph)
-  (:import-from :fiveam #:def-suite* #:def-test #:is #:in-suite))
+    (:use #:cl #:egraph)
+  (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
 (in-package :egraph/tests)
 
 (def-suite* :egraph)
+
+;;; E-graph data structure and rebuild
 
 (def-test union-find ()
   (let* ((*egraph* (make-egraph))
@@ -72,6 +74,8 @@
     (is (eq (enode-find a) (enode-find f-f-a)))
     (is (eq (enode-find a) (enode-find f-f-f-a)))
     (check-egraph)))
+
+;;; Pattern compiler
 
 (defrw commute-add (+ ?a ?b) (+ ?b ?a))
 (defrw commute-mul (* ?a ?b) (* ?b ?a))
@@ -166,6 +170,8 @@
             (run-rewrites '-add-0 :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))))
 
+;;; E-analysis
+
 (defun make-const-analysis ()
   (make-analysis-info
    :name 'const
@@ -236,3 +242,44 @@
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
     (is (eq (enode-find (make-term 1)) (enode-find a)))))
+
+;;; Micro benchmark
+
+(defrw sub-canon (- ?a ?b) (+ ?a (* -1 ?b)))
+
+(defrw distribute (* ?a (+ ?b ?c)) (+ (* ?a ?b) (* ?a ?c)))
+(defrw factor (+ (* ?a ?b) (* ?a ?c)) (* ?a (+ ?b ?c)))
+
+(defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
+(defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
+
+(defrw i-const (i ?x 1) ?x)
+(defrw i-cos (i ?x (cos ?x)) (sin ?x))
+(defrw i-sin (i ?x (sin ?x)) (* -1 (cos ?x)))
+(defrw i-add (i ?x (+ ?f ?g)) (+ (i ?x ?f) (i ?x ?g)))
+(defrw i-sub (i ?x (- ?f ?g)) (- (i ?x ?f) (i ?x ?g)))
+(defrw i-part (i ?x (* ?a ?b)) (- (* ?a (i ?x ?b)) (i ?x (* (d ?x ?a) (i ?x ?b)))))
+
+(def-test bench.math ()
+  (let ((timer (benchmark:make-timer)))
+    (loop for i from 1 to 3 do
+      (let ((*egraph* (make-egraph)))
+        (format t "~&Benchmark run ~a..." i)
+        (sb-ext:gc :full t)
+        (make-term '(i x (ln x)))
+        (make-term '(i x (+ x (cos x))))
+        (make-term '(i x (* (cos x) x)))
+        (make-term '(d x (+ 1 (* 2 x))))
+        (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
+        (make-term '(+ (* y (+ x y)) (- (+ x 2) (+ x x))))
+        (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2) (/ (- 1 (sqrt five)) 2))))
+        (egraph-rebuild)
+        (benchmark:with-sampling (timer)
+          (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1
+                          assoc-add assoc-mul sub-canon sub-cancel distribute factor
+                          d-add d-mul d-sin d-cos
+                          i-const i-cos i-sin i-add i-sub i-part)
+                        :max-iter 11))
+        (format t " ~a eclasses, ~a enodes"
+                (egraph-n-eclasses *egraph*) (egraph-n-enodes *egraph*))))
+    (benchmark:report timer)))

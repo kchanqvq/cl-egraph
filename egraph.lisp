@@ -1,7 +1,7 @@
 (uiop:define-package :egraph
-    (:use :cl :alexandria)
-  (:import-from :serapeum #:lret #:lret* #:-> #:string-prefix-p)
-  (:import-from :bind #:bind)
+    (:use #:cl #:alexandria)
+  (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p)
+  (:import-from #:bind #:bind)
   (:export #:make-enode #:make-egraph #:list-enodes
            #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
@@ -183,6 +183,8 @@ Only contains canonical enodes after `egraph-rebuild'."
                      (modify-analysis-data (enode-find enode) info))
                (egraph-analysis-info-list *egraph*))))))
 
+(defun intern-enode (enode)
+  )
 
 (-> enode-merge (enode enode) null)
 (defun enode-merge (x y)

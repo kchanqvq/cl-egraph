@@ -14,7 +14,8 @@
 (asdf:defsystem #:egraph/tests
   :serial t
   :depends-on (:egraph
-               :fiveam)
+               :fiveam
+               :trivial-benchmark)
   :components ((:file "egraph-tests")
                (:module "examples"
                 :components ((:file "math"))))
