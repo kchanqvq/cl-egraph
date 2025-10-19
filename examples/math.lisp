@@ -1,13 +1,27 @@
-(in-package :egraph/tests)
+(uiop:define-package :egraph/examples/math
+    (:use #:cl #:egraph)
+  (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
+
+(in-package :egraph/examples/math)
 
 (def-suite* math :in :egraph)
+
+(defrw commute-add (+ ?a ?b) (+ ?b ?a))
+(defrw commute-mul (* ?a ?b) (* ?b ?a))
+(defrw assoc-add (+ ?a (+ ?b ?c)) (+ (+ ?a ?b) ?c))
+(defrw assoc-mul (* ?a (* ?b ?c)) (* (* ?a ?b) ?c))
 
 (defrw sub-canon (- ?a ?b) (+ ?a (* -1 ?b)))
 (defrw div-canon (/ ?a ?b) (* ?a (pow ?b -1)) :guard (not (eql 0 (get-analysis-data ?b 'const))))
 
+(defrw add-0 (+ ?a 0) ?a)
+(defrw mul-0 (* ?a 0) 0)
+(defrw mul-1 (* ?a 1) ?a)
+
 (defrw -add-0 ?a (+ ?a 0))
 (defrw -mul-1 ?a (* ?a 1))
 
+(defrw sub-cancel (- ?a ?a) 0)
 (defrw div-cancel (/ ?a ?a) 1 :guard (not (eql 0 (get-analysis-data ?a 'const))))
 
 (defrw distribute (* ?a (+ ?b ?c)) (+ (* ?a ?b) (* ?a ?c)))
@@ -22,6 +36,35 @@
 
 (declaim (inline pow))
 (defun pow (x y) (expt x y))
+
+(defun make-const-analysis ()
+  (make-analysis-info
+   :name 'const
+   :make (lambda (fsym args)
+           (if args
+               (when (every #'identity args)
+                 ;; Guard against things like division by zero
+                 (ignore-errors
+                  (let* ((result (apply fsym args)))
+                    ;; Coerce integral float into integer
+                    (if (floatp result)
+                        (multiple-value-bind (int frac) (truncate result (float 1.0 result))
+                          (if (zerop frac) int result))
+                        result))))
+               (when (numberp fsym)
+                 fsym)))
+   :merge (lambda (x y)
+            (if (and (not x) y)
+                (values y t)
+                (values x nil)))
+   :modify (lambda (node data)
+             (when data
+               (let* ((term (list data))
+                      (const (make-enode term)))
+                 (declare (dynamic-extent term))
+                 (enode-merge node const)
+                 (setf (egraph::eclass-info-nodes (egraph::enode-parent (enode-find node)))
+                       (list const)))))))
 
 (defun make-var-analysis ()
   (make-analysis-info
@@ -38,6 +81,11 @@
   '(COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
     DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV))
 
+(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
+(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
+                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
+                                                             (vc (get-analysis-data ?c 'var)))
+                                        (not (eq vx vc)))))
 (defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
 (defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
 (defrw d-sin (d ?x (sin ?x)) (cos ?x))

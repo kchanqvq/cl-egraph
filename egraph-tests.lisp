@@ -264,7 +264,7 @@
   (let ((timer (benchmark:make-timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph)))
-        (format t "~&Benchmark run ~a..." i)
+        (format t "~&Benchmark run ~a." i)
         (sb-ext:gc :full t)
         (make-term '(i x (ln x)))
         (make-term '(i x (+ x (cos x))))
@@ -280,6 +280,6 @@
                           d-add d-mul d-sin d-cos
                           i-const i-cos i-sin i-add i-sub i-part)
                         :max-iter 11))
-        (format t " ~a eclasses, ~a enodes"
-                (egraph-n-eclasses *egraph*) (egraph-n-enodes *egraph*))))
+        (is (= 443792 (egraph-n-eclasses *egraph*)))
+        (is (= 1047556 (egraph-n-enodes *egraph*)))))
     (benchmark:report timer)))
