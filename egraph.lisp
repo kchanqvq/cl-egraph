@@ -135,12 +135,8 @@ Only contains canonical enodes after `egraph-rebuild'."
 (declaim (inline make-analysis-data modify-analysis-data merge-analysis-data))
 
 (defun make-analysis-data (enode analysis-info)
-  (let ((term (enode-term enode))
-        (i (analysis-info-data-index analysis-info)))
-    (funcall (analysis-info-make analysis-info) (car term)
-             (mapcar (lambda (arg)
-                       (svref (eclass-info-analysis-data-vec (enode-parent arg)) i))
-                     (cdr term)))))
+  (let ((term (enode-term enode)))
+    (apply (analysis-info-make analysis-info) term)))
 
 (defun modify-analysis-data (eclass analysis-info)
   (funcall (analysis-info-modify analysis-info) eclass

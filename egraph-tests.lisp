@@ -175,17 +175,21 @@
 (defun make-const-analysis ()
   (make-analysis-info
    :name 'const
-   :make (lambda (fsym args)
+   :make (lambda (fsym &rest args)
            (if args
-               (when (every #'identity args)
-                 ;; Guard against things like division by zero
-                 (ignore-errors
-                  (let* ((result (apply fsym args)))
-                    ;; Coerce integral float into integer
-                    (if (floatp result)
-                        (multiple-value-bind (int frac) (truncate result (float 1.0 result))
-                          (if (zerop frac) int result))
-                        result))))
+               (block nil
+                 (let ((args (mapcar (lambda (enode)
+                                       (or (get-analysis-data enode 'const)
+                                           (return)))
+                                     args)))
+                   ;; Guard against things like division by zero
+                   (ignore-errors
+                    (let* ((result (apply fsym args)))
+                      ;; Coerce integral float into integer
+                      (if (floatp result)
+                          (multiple-value-bind (int frac) (truncate result (float 1.0 result))
+                            (if (zerop frac) int result))
+                          result)))))
                (when (numberp fsym)
                  fsym)))
    :merge (lambda (x y)
@@ -215,7 +219,7 @@
 (defun make-var-analysis ()
   (make-analysis-info
    :name 'var
-   :make (lambda (fsym args)
+   :make (lambda (fsym &rest args)
            (when (and (not args) (symbolp fsym))
              fsym))
    :merge (lambda (x y)
