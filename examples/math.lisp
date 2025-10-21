@@ -117,10 +117,10 @@
 (defmacro def-math-test (name () lhs rhs)
   `(def-test ,name ()
      (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
-            (lhs (make-term ',lhs)))
+            (lhs (intern-term ',lhs)))
        (egraph-rebuild)
        (run-rewrites *math-rules* :max-enodes 5000)
-       (is (eq (enode-find (make-term ',rhs)) (enode-find lhs))))))
+       (is (eq (enode-find (intern-term ',rhs)) (enode-find lhs))))))
 
 (def-math-test math.simplify-root ()
   (/ 1 (- (/ (+ 1 (sqrt five)) 2)
@@ -135,8 +135,8 @@
 
 (def-test math.diff-power-harder ()
   (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
-         (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
-         (b (make-term '(* x (- (* 3 x) 14)))))
+         (a (intern-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
+         (b (intern-term '(* x (- (* 3 x) 14)))))
     (run-rewrites *math-rules* :max-enodes 5000)
     (is (eq (enode-find b) (enode-find a)))))
 

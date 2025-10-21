@@ -6,7 +6,7 @@
            #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses
-           #:do-matches #:defrw #:make-term #:run-rewrites
+           #:do-matches #:defrw #:intern-term #:run-rewrites
            #:make-analysis-info #:get-analysis-data
            #:greedy-extract))
 
@@ -165,6 +165,7 @@ Only contains canonical enodes after `egraph-rebuild'."
          (analysis-info-data-index
           (find name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name))))
 
+(-> make-enode (list) enode)
 (defun make-enode (term)
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
     (or (gethash term (egraph-hash-cons *egraph*))
@@ -183,8 +184,15 @@ Only contains canonical enodes after `egraph-rebuild'."
                      (modify-analysis-data (enode-find enode) info))
                (egraph-analysis-info-list *egraph*))))))
 
+(-> intern-enode (enode) enode)
 (defun intern-enode (enode)
-  )
+  (labels ((process (enode)
+             (let ((term (enode-term enode)))
+               (unless (gethash term (egraph-hash-cons *egraph*))
+                 (setf (gethash term (egraph-hash-cons *egraph*)) enode)
+                 (mapc #'process (cdr term))))))
+    (process enode)
+    enode))
 
 (-> enode-merge (enode enode) null)
 (defun enode-merge (x y)
@@ -228,7 +236,7 @@ Only contains canonical enodes after `egraph-rebuild'."
     (let ((enode (pop (egraph-work-list *egraph*))))
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons *egraph*))
-      (enode-merge (make-enode (enode-term enode)) enode)))
+      (enode-merge (intern-enode (make-enode (enode-term enode))) enode)))
   ;; Update analysis
   (map nil (lambda (analysis-info)
              (loop
@@ -400,23 +408,24 @@ TOP-NODE-VAR bound to the enode matching PAT."
                        *fsym-info-var-alist*)
            ,match-body))))
 
-(defvar *max-enodes* nil)
+(declaim (type function *apply-hook*))
+(defvar *apply-hook* #'enode-merge
+  "Function to apply a rewrite, receives two argument: LHS enode and (not yet
+interned) RHS enode.")
 
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
   `(defun ,name ()
      (do-matches (top-node ,lhs)
-       (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
-         (throw 'stop :max-enodes))
        (when ,guard
-         (enode-merge top-node ,(expand-template rhs))))))
+         (funcall *apply-hook* top-node (intern-enode ,(expand-template rhs)))))))
 
 ;;; Utils
 
-(defun make-term (term)
+(defun intern-term (term)
   (if (consp term)
-      (make-enode (cons (car term) (mapcar #'make-term (cdr term))))
-      (make-enode (list term))))
+      (intern-enode (make-enode (cons (car term) (mapcar #'intern-term (cdr term)))))
+      (intern-enode (make-enode (list term)))))
 
 (declaim (inline egraph-n-enodes egraph-n-eclasses))
 
@@ -426,7 +435,7 @@ TOP-NODE-VAR bound to the enode matching PAT."
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (rules &key max-iter check ((:max-enodes *max-enodes*)))
+(defun run-rewrites (rules &key max-iter check max-enodes)
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
@@ -436,12 +445,20 @@ have added some terms to EGRAPH, you MUST call `egraph-rebuild' before calling
 this function."
   (let ((n-enodes (egraph-n-enodes *egraph*))
         (n-eclasses (egraph-n-eclasses *egraph*))
-        (n-iter 0))
+        (n-iter 0)
+        (*apply-hook* *apply-hook*))
+    (when max-enodes
+      (setq *apply-hook*
+            (let ((old-hook *apply-hook*))
+              (lambda (lhs rhs)
+                (if (>= (egraph-n-enodes *egraph*) max-enodes)
+                    (throw 'stop :max-enodes)
+                    (funcall old-hook lhs rhs))))))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))
           (throw 'stop :max-iter))
-        (when (and *max-enodes* (>= n-enodes *max-enodes*))
+        (when (and max-enodes (>= n-enodes max-enodes))
           (throw 'stop :max-enodes))
         (unwind-protect
              (dolist (rule (ensure-list rules))

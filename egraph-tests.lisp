@@ -90,8 +90,8 @@
 
 (def-test simple.1 ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term '(* 0 42)))
-         (b (make-term 0)))
+         (a (intern-term '(* 0 42)))
+         (b (intern-term 0)))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1)
@@ -101,8 +101,8 @@
 
 (def-test simple.2 ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term '(+ 0 (* 1 foo))))
-         (b (make-term 'foo)))
+         (a (intern-term '(+ 0 (* 1 foo))))
+         (b (intern-term 'foo)))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1)
@@ -115,7 +115,7 @@
 
 (def-test ac ()
   (let ((*egraph* (make-egraph)))
-    (make-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 7))))))))
+    (intern-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 7))))))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add assoc-add)
@@ -128,9 +128,9 @@
 
 (def-test nonlinear ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term '(- (+ a b) (+ b a))))
-         (b (make-term '(- (+ a a) (* 2 a))))
-         (c (make-term '(+ a (- b (* 1 b))))))
+         (a (intern-term '(- (+ a b) (+ b a))))
+         (b (intern-term '(- (+ a a) (* 2 a))))
+         (c (intern-term '(+ a (- b (* 1 b))))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(sub-cancel add-2
@@ -145,11 +145,11 @@
 
 (def-test ground ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term '(d a (sin a))))
-         (b (make-term '(d (+ a b) (sin (+ b a)))))
-         (b-1 (make-term '(cos (+ a b))))
-         (c (make-term '(d a (d a (sin a)))))
-         (c-1 (make-term '(* -1 (sin a)))))
+         (a (intern-term '(d a (sin a))))
+         (b (intern-term '(d (+ a b) (sin (+ b a)))))
+         (b-1 (intern-term '(cos (+ a b))))
+         (c (intern-term '(d a (d a (sin a)))))
+         (c-1 (intern-term '(* -1 (sin a)))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(d-sin d-cos
@@ -163,8 +163,8 @@
 
 (def-test single-var-pat ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term 'a))
-         (b (make-term '(+ (+ (+ a 0) 0) 0))))
+         (a (intern-term 'a))
+         (b (intern-term '(+ (+ (+ a 0) 0) 0))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '-add-0 :check t :max-iter 10)))
@@ -203,9 +203,9 @@
 
 (def-test analysis.const ()
   (let* ((*egraph* (make-egraph :analyses (make-const-analysis)))
-         (a (make-term '(+ 3 (+ 2 a))))
-         (b (make-term '(+ a 5)))
-         (c (make-term '(+ 2 (* 3 5)))))
+         (a (intern-term '(+ 3 (+ 2 a))))
+         (b (intern-term '(+ a 5)))
+         (c (intern-term '(+ 2 (* 3 5)))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul assoc-add assoc-mul) :check t :max-iter 10)))
@@ -231,17 +231,17 @@
 
 (def-test analysis.multiple.1 ()
   (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
-         (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
+         (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
-    (is (eq (enode-find (make-term 1)) (enode-find a)))))
+    (is (eq (enode-find (intern-term 1)) (enode-find a)))))
 
 (def-test analysis.multiple.2 ()
   (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis) (make-var-analysis))))
-         (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
+         (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
-    (is (eq (enode-find (make-term 1)) (enode-find a)))))
+    (is (eq (enode-find (intern-term 1)) (enode-find a)))))
 
 ;;; Micro benchmark
 
@@ -266,13 +266,13 @@
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
         (sb-ext:gc :full t)
-        (make-term '(i x (ln x)))
-        (make-term '(i x (+ x (cos x))))
-        (make-term '(i x (* (cos x) x)))
-        (make-term '(d x (+ 1 (* 2 x))))
-        (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
-        (make-term '(+ (* y (+ x y)) (- (+ x 2) (+ x x))))
-        (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2) (/ (- 1 (sqrt five)) 2))))
+        (intern-term '(i x (ln x)))
+        (intern-term '(i x (+ x (cos x))))
+        (intern-term '(i x (* (cos x) x)))
+        (intern-term '(d x (+ 1 (* 2 x))))
+        (intern-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
+        (intern-term '(+ (* y (+ x y)) (- (+ x 2) (+ x x))))
+        (intern-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2) (/ (- 1 (sqrt five)) 2))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
           (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1
