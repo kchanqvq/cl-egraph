@@ -64,7 +64,7 @@
    :modify (lambda (node data)
              (when data
                (let* ((term (list data))
-                      (const (make-enode term)))
+                      (const (intern-enode (make-enode term))))
                  (declare (dynamic-extent term))
                  (enode-merge node const)
                  (setf (egraph::eclass-info-nodes (egraph::enode-parent (enode-find node)))
@@ -143,6 +143,18 @@
          (b (intern-term '(* x (- (* 3 x) 14)))))
     (run-rewrites *math-rules* :max-enodes 5000)
     (is (eq (enode-find b) (enode-find a)))))
+
+(def-test bench.math.diff ()
+  (let ((timer (benchmark:make-timer)))
+    (loop for i from 1 to 3 do
+      (let ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis)))))
+        (format t "~&Benchmark run ~a." i)
+        (sb-ext:gc :full t)
+        (intern-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
+        (egraph-rebuild)
+        (benchmark:with-sampling (timer)
+          (run-rewrites *math-rules* :max-enodes 50000))))
+    (benchmark:report timer)))
 
 (def-math-test math.integral-part.1 ()
   (i (* x (cos x)) x) (+ (* x (sin x)) (cos x)))

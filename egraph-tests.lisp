@@ -199,7 +199,7 @@
    :modify (lambda (node data)
              (when data
                (let* ((term (list data))
-                      (const (make-enode term)))
+                      (const (intern-enode (make-enode term))))
                  (declare (dynamic-extent term))
                  (enode-merge node const)
                  (setf (egraph::eclass-info-nodes (egraph::enode-parent (enode-find node)))
@@ -286,4 +286,18 @@
                         :max-iter 11))
         (is (= 443792 (egraph-n-eclasses *egraph*)))
         (is (= 1047556 (egraph-n-enodes *egraph*)))))
+    (benchmark:report timer)))
+
+(def-test bench.analysis-ac ()
+  (let ((timer (benchmark:make-timer)))
+    (loop for i from 1 to 3 do
+      (let ((*egraph* (make-egraph :analyses (make-const-analysis))))
+        (format t "~&Benchmark run ~a." i)
+        (sb-ext:gc :full t)
+        (intern-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))
+        (egraph-rebuild)
+        (benchmark:with-sampling (timer)
+          (run-rewrites '(commute-add assoc-add)))
+        (is (= 479 (egraph-n-eclasses *egraph*)))
+        (is (= 39088 (egraph-n-enodes *egraph*)))))
     (benchmark:report timer)))

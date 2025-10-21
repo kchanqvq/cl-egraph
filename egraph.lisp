@@ -431,7 +431,7 @@ interned) RHS enode.")
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (rules &key max-iter check max-enodes)
+(defun run-rewrites (rules &key max-iter check max-enodes max-cost)
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
@@ -450,6 +450,18 @@ this function."
                 (if (>= (egraph-n-enodes *egraph*) max-enodes)
                     (throw 'stop :max-enodes)
                     (funcall old-hook lhs rhs))))))
+    (setq *apply-hook*
+          (let ((old-hook *apply-hook*))
+            (etypecase max-cost
+              (number
+               (lambda (lhs rhs)
+                 (unless (> (get-analysis-data rhs 'cost) max-cost)
+                   (funcall old-hook lhs rhs))))
+              (function
+               (lambda (lhs rhs)
+                (unless (> (get-analysis-data rhs 'cost) (funcall max-cost n-iter))
+                  (funcall old-hook lhs rhs))))
+              (null old-hook))))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))
