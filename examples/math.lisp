@@ -114,9 +114,9 @@
 
 (defvar *math-rules* (append *math-base-rules* *math-diff-rules* *math-integral-rules*))
 
-(defun ast-size-no-d-or-i (fsym arg-costs)
+(defun ast-size-no-d-or-i (enode arg-costs)
   (when (every #'identity arg-costs)
-    (+ (if (member fsym '(d i)) 100 1) (reduce #'+ arg-costs))))
+    (+ (if (member (car (enode-term enode)) '(d i)) 100 1) (reduce #'+ arg-costs))))
 
 (defmacro def-math-test (name () lhs rhs)
   `(def-test ,name ()

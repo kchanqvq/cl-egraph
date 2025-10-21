@@ -83,8 +83,8 @@
 (defrw mul-0 (* ?a 0) 0)
 (defrw mul-1 (* ?a 1) ?a)
 
-(defun ast-size (fsym arg-costs)
-  (declare (ignore fsym))
+(defun ast-size (enode arg-costs)
+  (declare (ignore enode))
   (when (every #'identity arg-costs)
     (1+ (reduce #'+ arg-costs))))
 

@@ -2,13 +2,13 @@
     (:use #:cl #:alexandria)
   (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p)
   (:import-from #:bind #:bind)
-  (:export #:make-enode #:make-egraph #:list-enodes
+  (:export #:make-enode #:intern-enode #:enode-term #:make-egraph #:list-enodes
            #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild
            #:enode-representative-p #:enode-canonical-p #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses
            #:do-matches #:defrw #:intern-term #:run-rewrites
            #:make-analysis-info #:get-analysis-data
-           #:greedy-extract))
+           #:greedy-extract #:cost))
 
 (in-package :egraph)
 
@@ -473,8 +473,8 @@ this function."
 (defun greedy-extract (enode cost-fn)
   "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
 
-COST-FN should accept 2 arguments: a function symbol and a list of costs for
-each argument eclass. It should return a number.
+COST-FN should accept 2 arguments: the enode and a list of costs for each
+argument eclass. It should return a number.
 
 ENODE can also be a list of enodes, and a list of terms will be returned."
   (let ((selections (make-hash-table))) ;; map eclass to (cost . enode)
@@ -485,7 +485,7 @@ ENODE can also be a list of enodes, and a list of terms will be returned."
                           (dolist (enode (list-enodes class))
                             (let* ((term (enode-term enode))
                                    (new-cost
-                                     (funcall cost-fn (car term)
+                                     (funcall cost-fn enode
                                               (mapcar (compose #'car (rcurry #'gethash selections))
                                                       (cdr term)))))
                               (when (if selection (and new-cost (< new-cost (car selection)))
