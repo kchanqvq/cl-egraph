@@ -172,14 +172,19 @@
 
 ;;; E-analysis
 
-(defun make-const-analysis ()
-  (make-analysis-info
-   :name 'const
-   :make (lambda (fsym &rest args)
+(defclass const-analysis ()
+  ((const :initform nil :accessor const)))
+
+(defmethod egraph::update-eclass-info egraph::sor ((self const-analysis) node)
+  (let* ((term (enode-term node))
+         (fsym (car term))
+         (args (cdr term))
+         (node-const
            (if args
                (block nil
                  (let ((args (mapcar (lambda (enode)
-                                       (or (get-analysis-data enode 'const)
+                                       (or (const (egraph::enode-parent
+                                                   (enode-find enode)))
                                            (return)))
                                      args)))
                    ;; Guard against things like division by zero
@@ -191,57 +196,81 @@
                             (if (zerop frac) int result))
                           result)))))
                (when (numberp fsym)
-                 fsym)))
-   :merge (lambda (x y)
-            (if (and (not x) y)
-                (values y t)
-                (values x nil)))
-   :modify (lambda (node data)
-             (when data
-               (let* ((term (list data))
-                      (const (intern-enode (make-enode term))))
-                 (declare (dynamic-extent term))
-                 (enode-merge node const)
-                 (setf (egraph::eclass-info-nodes (egraph::enode-parent (enode-find node)))
-                       (list const)))))))
+                 fsym))))
+    (when (and (not (const self)) node-const)
+      (setf (const self) node-const)
+      t)))
+
+(defmethod egraph::merge-eclass-info egraph::sor ((dst const-analysis) src)
+  (when (and (not (const dst)) (const src))
+    (setf (const dst) (const src))
+    t))
+
+(defmethod (setf const) :after (new-value (self const-analysis))
+  (let* ((term (list new-value))
+         (const (intern-enode (make-enode term))))
+    (declare (dynamic-extent term))
+    (enode-merge (car (egraph::eclass-info-nodes self)) const)
+    (setf (egraph::eclass-info-nodes self) (list const))))
+
+(defclass const-eclass-info (const-analysis egraph::eclass-info) ())
+
+(defclass const-egraph (egraph) ())
+
+(defmethod egraph::make-eclass-info ((egraph const-egraph) &key node)
+  (make-instance 'const-eclass-info :node node))
 
 (def-test analysis.const ()
-  (let* ((*egraph* (make-egraph :analyses (make-const-analysis)))
+  (let* ((*egraph* (make-instance 'const-egraph))
          (a (intern-term '(+ 3 (+ 2 a))))
          (b (intern-term '(+ a 5)))
          (c (intern-term '(+ 2 (* 3 5)))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul assoc-add assoc-mul) :check t :max-iter 10)))
-    (is (eq (enode-find a) (enode-find b)))
+    (is (eq (enode-find b) (enode-find a)))
     (is (equal 17 (greedy-extract c #'ast-size)))))
 
-(defun make-var-analysis ()
-  (make-analysis-info
-   :name 'var
-   :make (lambda (fsym &rest args)
-           (when (and (not args) (symbolp fsym))
-             fsym))
-   :merge (lambda (x y)
-            (if (and (not x) y)
-                (values y t)
-                (values x nil)))))
+(defclass var-analysis ()
+  ((var :initform nil :accessor var)))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
-                                                             (vc (get-analysis-data ?c 'var)))
+(defmethod egraph::update-eclass-info egraph::sor ((self var-analysis) node)
+  (let* ((term (enode-term node))
+         (fsym (car term))
+         (args (cdr term))
+         (node-var (when (and (not args) (symbolp fsym))
+                     fsym)))
+    (when (and (not (var self)) node-var)
+      (setf (var self) node-var)
+      t)))
+
+(defmethod egraph::merge-eclass-info egraph::sor ((dst var-analysis) src)
+  (when (and (not (var dst)) (var src))
+    (setf (var dst) (var src))
+    t))
+
+(defclass const-var-eclass-info (const-analysis var-analysis egraph::eclass-info) ())
+
+(defclass const-var-egraph (egraph) ())
+
+(defmethod egraph::make-eclass-info ((egraph const-var-egraph) &key node)
+  (make-instance 'const-var-eclass-info :node node))
+
+(defrw d-var (d ?x ?x) 1 :guard (var (egraph::enode-parent (enode-find ?x))))
+(defrw d-const (d ?x ?c) 0 :guard (or (const (egraph::enode-parent (enode-find ?c)))
+                                      (alexandria:when-let* ((vx (var (egraph::enode-parent (enode-find ?x))))
+                                                             (vc (var (egraph::enode-parent (enode-find ?c)))))
                                         (not (eq vx vc)))))
 
 (def-test analysis.multiple.1 ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+  (let* ((*egraph* (make-instance 'const-var-egraph))
          (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
     (is (eq (enode-find (intern-term 1)) (enode-find a)))))
 
 (def-test analysis.multiple.2 ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis) (make-var-analysis))))
+  (let* ((*egraph* (make-instance 'const-var-egraph))
          (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
@@ -291,7 +320,7 @@
 (def-test bench.analysis-ac ()
   (let ((timer (benchmark:make-timer)))
     (loop for i from 1 to 3 do
-      (let ((*egraph* (make-egraph :analyses (make-const-analysis))))
+      (let ((*egraph* (make-instance 'const-egraph)))
         (format t "~&Benchmark run ~a." i)
         (sb-ext:gc :full t)
         (intern-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))

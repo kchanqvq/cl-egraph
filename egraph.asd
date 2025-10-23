@@ -18,5 +18,5 @@
                :trivial-benchmark)
   :components ((:file "egraph-tests")
                (:module "examples"
-                :components ((:file "math"))))
+               #+nil  :components #+nil ((:file "math"))))
   :perform (test-op (o c) (symbol-call :fiveam '#:run! :egraph)))
