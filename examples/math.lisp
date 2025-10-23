@@ -6,45 +6,13 @@
 
 (def-suite* math :in :egraph)
 
-(defrw commute-add (+ ?a ?b) (+ ?b ?a))
-(defrw commute-mul (* ?a ?b) (* ?b ?a))
-(defrw assoc-add (+ ?a (+ ?b ?c)) (+ (+ ?a ?b) ?c))
-(defrw assoc-mul (* ?a (* ?b ?c)) (* (* ?a ?b) ?c))
-
-(defrw sub-canon (- ?a ?b) (+ ?a (* -1 ?b)))
-(defrw div-canon (/ ?a ?b) (* ?a (pow ?b -1)) :guard (not (eql 0 (get-analysis-data ?b 'const))))
-
-(defrw add-0 (+ ?a 0) ?a)
-(defrw mul-0 (* ?a 0) 0)
-(defrw mul-1 (* ?a 1) ?a)
-
-(defrw -add-0 ?a (+ ?a 0))
-(defrw -mul-1 ?a (* ?a 1))
-
-(defrw sub-cancel (- ?a ?a) 0)
-(defrw div-cancel (/ ?a ?a) 1 :guard (not (eql 0 (get-analysis-data ?a 'const))))
-
-(defrw distribute (* ?a (+ ?b ?c)) (+ (* ?a ?b) (* ?a ?c)))
-(defrw factor (+ (* ?a ?b) (* ?a ?c)) (* ?a (+ ?b ?c)))
-
-(defrw pow-mul (* (pow ?a ?b) (pow ?a ?c)) (pow ?a (+ ?b ?c)))
-(defrw pow-0 (pow ?a 0) 1 :guard (not (eql 0 (get-analysis-data ?a 'const))))
-(defrw pow-1 (pow ?a 1) ?a)
-(defrw pow-2 (pow ?a 2) (* ?a ?a))
-(defrw pow-recip (pow ?a -1) (/ 1 ?a) :guard (not (eql 0 (get-analysis-data ?a 'const))))
-(defrw recip-mul-div (* ?x (/ 1 ?x)) 1 :guard (not (eql 0 (get-analysis-data ?x 'const))))
-
-(declaim (inline pow))
-(defun pow (x y) (expt x y))
-
-(defun make-const-analysis ()
+(defvar *const-analysis*
   (make-analysis-info
-   :name 'const
    :make (lambda (fsym &rest args)
            (if args
                (block nil
                  (let ((args (mapcar (lambda (enode)
-                                       (or (get-analysis-data enode 'const)
+                                       (or (get-analysis-data enode *const-analysis*)
                                            (return)))
                                      args)))
                    ;; Guard against things like division by zero
@@ -70,9 +38,8 @@
                  (setf (egraph::eclass-info-nodes (enode-eclass-info node))
                        (list const)))))))
 
-(defun make-var-analysis ()
+(defvar *var-analysis*
   (make-analysis-info
-   :name 'var
    :make (lambda (fsym &rest args)
            (when (and (not args) (symbolp fsym))
              fsym))
@@ -81,29 +48,60 @@
                 (values y t)
                 (values x nil)))))
 
+(defrw commute-add (+ ?a ?b) (+ ?b ?a))
+(defrw commute-mul (* ?a ?b) (* ?b ?a))
+(defrw assoc-add (+ ?a (+ ?b ?c)) (+ (+ ?a ?b) ?c))
+(defrw assoc-mul (* ?a (* ?b ?c)) (* (* ?a ?b) ?c))
+
+(defrw sub-canon (- ?a ?b) (+ ?a (* -1 ?b)))
+(defrw div-canon (/ ?a ?b) (* ?a (pow ?b -1)) :guard (not (eql 0 (get-analysis-data ?b *const-analysis*))))
+
+(defrw add-0 (+ ?a 0) ?a)
+(defrw mul-0 (* ?a 0) 0)
+(defrw mul-1 (* ?a 1) ?a)
+
+(defrw -add-0 ?a (+ ?a 0))
+(defrw -mul-1 ?a (* ?a 1))
+
+(defrw sub-cancel (- ?a ?a) 0)
+(defrw div-cancel (/ ?a ?a) 1 :guard (not (eql 0 (get-analysis-data ?a *const-analysis*))))
+
+(defrw distribute (* ?a (+ ?b ?c)) (+ (* ?a ?b) (* ?a ?c)))
+(defrw factor (+ (* ?a ?b) (* ?a ?c)) (* ?a (+ ?b ?c)))
+
+(defrw pow-mul (* (pow ?a ?b) (pow ?a ?c)) (pow ?a (+ ?b ?c)))
+(defrw pow-0 (pow ?a 0) 1 :guard (not (eql 0 (get-analysis-data ?a *const-analysis*))))
+(defrw pow-1 (pow ?a 1) ?a)
+(defrw pow-2 (pow ?a 2) (* ?a ?a))
+(defrw pow-recip (pow ?a -1) (/ 1 ?a) :guard (not (eql 0 (get-analysis-data ?a *const-analysis*))))
+(defrw recip-mul-div (* ?x (/ 1 ?x)) 1 :guard (not (eql 0 (get-analysis-data ?x *const-analysis*))))
+
+(declaim (inline pow))
+(defun pow (x y) (expt x y))
+
 (defvar *math-base-rules*
   '(COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
     DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
-                                                             (vc (get-analysis-data ?c 'var)))
+(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x *var-analysis*))
+(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c *const-analysis*)
+                                      (alexandria:when-let* ((vx (get-analysis-data ?x *var-analysis*))
+                                                             (vc (get-analysis-data ?c *var-analysis*)))
                                         (not (eq vx vc)))))
 (defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
 (defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
 (defrw d-sin (d ?x (sin ?x)) (cos ?x))
 (defrw d-cos (d ?x (cos ?x)) (* -1 (sin ?x)))
-(defrw d-ln (d ?x (ln ?x)) (/ 1 ?x) :guard (not (eql 0 (get-analysis-data ?x 'const))))
+(defrw d-ln (d ?x (ln ?x)) (/ 1 ?x) :guard (not (eql 0 (get-analysis-data ?x *const-analysis*))))
 (defrw d-pow (d ?x (pow ?f ?g)) (* (pow ?f ?g) (+ (* (d ?x ?f) (/ ?g ?f)) (* (d ?x ?g) (ln ?f))))
-  :guard (and (not (eql 0 (get-analysis-data ?f 'const)))
-              (not (eql 0 (get-analysis-data ?g 'const)))))
+  :guard (and (not (eql 0 (get-analysis-data ?f *const-analysis*)))
+              (not (eql 0 (get-analysis-data ?g *const-analysis*)))))
 
 (defvar *math-diff-rules* '(D-VAR D-CONST D-ADD D-MUL D-SIN D-COS D-LN D-POW))
 
 (defrw i-one (i 1 ?x) ?x)
 (defrw i-pow-const (i (pow ?x ?c) ?x)
-  (/ (pow ?x (+ ?c 1)) (+ ?c 1)) :guard (get-analysis-data ?c 'const))
+  (/ (pow ?x (+ ?c 1)) (+ ?c 1)) :guard (get-analysis-data ?c *const-analysis*))
 (defrw i-cos (i (cos ?x) ?x) (sin ?x))
 (defrw i-sin (i (sin ?x) ?x) (* -1 (cos ?x)))
 (defrw i-sum (i (+ ?f ?g) ?x) (+ (i ?f ?x) (i ?g ?x)))
@@ -120,7 +118,7 @@
 
 (defmacro def-math-test (name () lhs rhs)
   `(def-test ,name ()
-     (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+     (let* ((*egraph* (make-egraph :analyses (list *var-analysis* *const-analysis*)))
             (lhs (intern-term ',lhs)))
        (egraph-rebuild)
        (run-rewrites *math-rules* :max-enodes 5000)
@@ -138,7 +136,7 @@
   (d x (pow x 3)) (* 3 (pow x 2)))
 
 (def-test math.diff-power-harder ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+  (let* ((*egraph* (make-egraph :analyses (list *var-analysis* *const-analysis*)))
          (a (intern-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
          (b (intern-term '(* x (- (* 3 x) 14)))))
     (run-rewrites *math-rules* :max-enodes 5000)
@@ -147,7 +145,7 @@
 (def-test bench.math.diff ()
   (let ((timer (benchmark:make-timer)))
     (loop for i from 1 to 3 do
-      (let ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis)))))
+      (let ((*egraph* (make-egraph :analyses (list *var-analysis* *const-analysis*))))
         (format t "~&Benchmark run ~a." i)
         (sb-ext:gc :full t)
         (intern-term '(d x (- (pow x 3) (* 7 (pow x 2)))))

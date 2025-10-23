@@ -42,10 +42,6 @@ representativeness."
    :type fixnum)
   (canonical-flag t :type boolean))
 
-(defmethod print-object ((self enode) stream)
-  (print-unreadable-object (self stream :type t :identity t)
-    (format stream "~:[~;REP ~]~a" (enode-representative-p self) (enode-term self))))
-
 (declaim (inline enode-representative-p enode-canonical-p enode-eclass-info))
 
 ;; Be aware that representative enode might be non-canonical!
@@ -57,6 +53,10 @@ representativeness."
 
 (defun enode-eclass-info (enode)
   (enode-parent (enode-find enode)))
+
+(defmethod print-object ((self enode) stream)
+  (print-unreadable-object (self stream :type t :identity t)
+    (format stream "~:[~;REP ~]~a" (enode-representative-p self) (enode-term self))))
 
 (defun term-equal (x y)
   (unless (eql (car x) (car y))
@@ -95,7 +95,6 @@ function symbol."
 
 (defstruct analysis-info
   "Data for e-analysis."
-  (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type function)
   (merge (required-argument :merge) :type function)
   (modify (constantly nil) :type function))
@@ -167,10 +166,10 @@ Only contains canonical enodes after `egraph-rebuild'."
             ;; modify hook might make ECLASS no longer representative
             (setf eclass (enode-find eclass)))))
 
-(-> get-analysis-data (enode symbol) t)
-(defun get-analysis-data (enode name)
+(-> get-analysis-data (enode analysis-info) t)
+(defun get-analysis-data (enode analysis-info)
   (svref (eclass-info-analysis-data-vec (enode-eclass-info enode))
-         (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)))
+         (position analysis-info (egraph-analysis-info-list *egraph*))))
 
 (-> make-enode (list) enode)
 (defun make-enode (term)
@@ -425,7 +424,7 @@ interned) RHS enode.")
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (rules &key max-iter check max-enodes max-cost)
+(defun run-rewrites (rules &key max-iter check max-enodes)
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
@@ -444,18 +443,6 @@ this function."
                 (if (>= (egraph-n-enodes *egraph*) max-enodes)
                     (throw 'stop :max-enodes)
                     (funcall old-hook lhs rhs))))))
-    (setq *apply-hook*
-          (let ((old-hook *apply-hook*))
-            (etypecase max-cost
-              (number
-               (lambda (lhs rhs)
-                 (unless (> (get-analysis-data rhs 'cost) max-cost)
-                   (funcall old-hook lhs rhs))))
-              (function
-               (lambda (lhs rhs)
-                (unless (> (get-analysis-data rhs 'cost) (funcall max-cost n-iter))
-                  (funcall old-hook lhs rhs))))
-              (null old-hook))))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))

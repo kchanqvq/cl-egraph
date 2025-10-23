@@ -172,14 +172,13 @@
 
 ;;; E-analysis
 
-(defun make-const-analysis ()
+(defvar *const-analysis*
   (make-analysis-info
-   :name 'const
    :make (lambda (fsym &rest args)
            (if args
                (block nil
                  (let ((args (mapcar (lambda (enode)
-                                       (or (get-analysis-data enode 'const)
+                                       (or (get-analysis-data enode *const-analysis*)
                                            (return)))
                                      args)))
                    ;; Guard against things like division by zero
@@ -206,7 +205,7 @@
                        (list const)))))))
 
 (def-test analysis.const ()
-  (let* ((*egraph* (make-egraph :analyses (make-const-analysis)))
+  (let* ((*egraph* (make-egraph :analyses *const-analysis*))
          (a (intern-term '(+ 3 (+ 2 a))))
          (b (intern-term '(+ a 5)))
          (c (intern-term '(+ 2 (* 3 5)))))
@@ -216,9 +215,8 @@
     (is (eq (enode-find a) (enode-find b)))
     (is (equal 17 (greedy-extract c #'ast-size)))))
 
-(defun make-var-analysis ()
+(defvar *var-analysis*
   (make-analysis-info
-   :name 'var
    :make (lambda (fsym &rest args)
            (when (and (not args) (symbolp fsym))
              fsym))
@@ -227,21 +225,21 @@
                 (values y t)
                 (values x nil)))))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
-                                                             (vc (get-analysis-data ?c 'var)))
+(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x *var-analysis*))
+(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c *const-analysis*)
+                                      (alexandria:when-let* ((vx (get-analysis-data ?x *var-analysis*))
+                                                             (vc (get-analysis-data ?c *var-analysis*)))
                                         (not (eq vx vc)))))
 
 (def-test analysis.multiple.1 ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-var-analysis) (make-const-analysis))))
+  (let* ((*egraph* (make-egraph :analyses (list *var-analysis* *const-analysis*)))
          (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
     (is (eq (enode-find (intern-term 1)) (enode-find a)))))
 
 (def-test analysis.multiple.2 ()
-  (let* ((*egraph* (make-egraph :analyses (list (make-const-analysis) (make-var-analysis))))
+  (let* ((*egraph* (make-egraph :analyses (list *const-analysis* *var-analysis*)))
          (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
@@ -291,7 +289,7 @@
 (def-test bench.analysis-ac ()
   (let ((timer (benchmark:make-timer)))
     (loop for i from 1 to 3 do
-      (let ((*egraph* (make-egraph :analyses (make-const-analysis))))
+      (let ((*egraph* (make-egraph :analyses *const-analysis*)))
         (format t "~&Benchmark run ~a." i)
         (sb-ext:gc :full t)
         (intern-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))
