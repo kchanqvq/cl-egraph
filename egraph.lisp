@@ -293,7 +293,7 @@ Only contains canonical enodes after `egraph-rebuild'."
               (dolist (arg (cdr (enode-term node)))
                 (unless (member node (eclass-info-parents (enode-parent arg)))
                   (error "Missing parent link from ~a to ~a" arg node)))
-              (error "Non canonical node ~a on ~a's circular node list" node class)))
+              (error "Non canonical node ~a on ~a's node list" node class)))
         (unless (= (length nodes)
                    (length (remove-duplicates nodes :test 'equal :key #'enode-term)))
           (warn "Duplicates in ~a's enodes:~% ~a" class nodes)))
