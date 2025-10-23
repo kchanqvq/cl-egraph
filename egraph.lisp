@@ -128,8 +128,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
 
 (-> enode-find (enode) enode)
 (defun enode-find (enode)
-  (let ((enode enode)
-        (parent (enode-parent enode)))
+  (let ((parent (enode-parent enode)))
     (if (eclass-info-p parent)
         enode
         (loop
