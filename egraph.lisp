@@ -3,8 +3,8 @@
   (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p)
   (:import-from #:bind #:bind)
   (:export #:make-enode #:intern-enode #:enode-term #:make-egraph #:list-enodes
-           #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild
-           #:enode-representative-p #:enode-canonical-p #:check-egraph
+           #:enode-representative-p #:enode-canonical-p #:enode-eclass-info
+           #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses
            #:do-matches #:defrw #:intern-term #:run-rewrites
            #:make-analysis-info #:get-analysis-data
@@ -45,6 +45,18 @@ representativeness."
 (defmethod print-object ((self enode) stream)
   (print-unreadable-object (self stream :type t :identity t)
     (format stream "~:[~;REP ~]~a" (enode-representative-p self) (enode-term self))))
+
+(declaim (inline enode-representative-p enode-canonical-p enode-eclass-info))
+
+;; Be aware that representative enode might be non-canonical!
+(defun enode-representative-p (enode)
+  (eclass-info-p (enode-parent enode)))
+
+(defun enode-canonical-p (enode)
+  (every #'enode-representative-p (cdr (enode-term enode))))
+
+(defun enode-eclass-info (enode)
+  (enode-parent (enode-find enode)))
 
 (defun term-equal (x y)
   (unless (eql (car x) (car y))
@@ -122,7 +134,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   "List of enodes equivalent to ENODE.
 
 Only contains canonical enodes after `egraph-rebuild'."
-  (eclass-info-nodes (enode-parent (enode-find enode))))
+  (eclass-info-nodes (enode-eclass-info enode)))
 
 (declaim (inline make-analysis-data merge-analysis-data modify-analysis-data))
 
@@ -157,7 +169,7 @@ Only contains canonical enodes after `egraph-rebuild'."
 
 (-> get-analysis-data (enode symbol) t)
 (defun get-analysis-data (enode name)
-  (svref (eclass-info-analysis-data-vec (enode-parent (enode-find enode)))
+  (svref (eclass-info-analysis-data-vec (enode-eclass-info enode))
          (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)))
 
 (-> make-enode (list) enode)
@@ -204,15 +216,6 @@ Only contains canonical enodes after `egraph-rebuild'."
         (merge-analysis-data x (eclass-info-analysis-data-vec py))
         (modify-analysis-data x)
         nil))))
-
-(declaim (inline enode-representative-p enode-canonical-p))
-
-;; Be aware that representative enode might be non-canonical!
-(defun enode-representative-p (enode)
-  (eclass-info-p (enode-parent enode)))
-
-(defun enode-canonical-p (enode)
-  (every #'enode-representative-p (cdr (enode-term enode))))
 
 (defun egraph-rebuild ()
   ;; Upward propagation

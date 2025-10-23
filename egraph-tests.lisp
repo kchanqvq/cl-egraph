@@ -202,7 +202,7 @@
                       (const (intern-enode (make-enode term))))
                  (declare (dynamic-extent term))
                  (enode-merge node const)
-                 (setf (egraph::eclass-info-nodes (egraph::enode-parent (enode-find node)))
+                 (setf (egraph::eclass-info-nodes (enode-eclass-info node))
                        (list const)))))))
 
 (def-test analysis.const ()
