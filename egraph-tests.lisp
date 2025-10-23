@@ -265,7 +265,7 @@
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
-        (sb-ext:gc :full t)
+        (trivial-garbage:gc :full t)
         (intern-term '(i x (ln x)))
         (intern-term '(i x (+ x (cos x))))
         (intern-term '(i x (* (cos x) x)))
@@ -289,7 +289,7 @@
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph :analyses 'const)))
         (format t "~&Benchmark run ~a." i)
-        (sb-ext:gc :full t)
+        (trivial-garbage:gc :full t)
         (intern-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)

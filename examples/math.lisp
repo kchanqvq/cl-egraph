@@ -145,7 +145,7 @@
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph :analyses '(var const))))
         (format t "~&Benchmark run ~a." i)
-        (sb-ext:gc :full t)
+        (trivial-garbage:gc :full t)
         (intern-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
