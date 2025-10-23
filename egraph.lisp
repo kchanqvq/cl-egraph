@@ -93,7 +93,7 @@ function symbol."
   (nodes nil :type list)
   (node-table (make-hash-table :test 'eq) :type hash-table))
 
-(defvar *analysis-info-registry* (make-hash-table))
+(defvar *analysis-info-registry* (trivial-garbage:make-weak-hash-table))
 
 (defstruct analysis-info
   "Data for e-analysis."

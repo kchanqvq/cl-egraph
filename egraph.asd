@@ -7,7 +7,8 @@
                :serapeum
                :metabang-bind
                :cl-custom-hash-table
-               :global-vars)
+               :global-vars
+               :trivial-garbage)
   :components ((:file "egraph"))
   :in-order-to ((test-op (test-op "egraph/tests"))))
 
