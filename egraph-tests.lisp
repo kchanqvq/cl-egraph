@@ -172,40 +172,39 @@
 
 ;;; E-analysis
 
-(defvar *const-analysis*
-  (make-analysis-info
-   :make (lambda (fsym &rest args)
-           (if args
-               (block nil
-                 (let ((args (mapcar (lambda (enode)
-                                       (or (get-analysis-data enode *const-analysis*)
-                                           (return)))
-                                     args)))
-                   ;; Guard against things like division by zero
-                   (ignore-errors
-                    (let* ((result (apply fsym args)))
-                      ;; Coerce integral float into integer
-                      (if (floatp result)
-                          (multiple-value-bind (int frac) (truncate result (float 1.0 result))
-                            (if (zerop frac) int result))
-                          result)))))
-               (when (numberp fsym)
-                 fsym)))
-   :merge (lambda (x y)
-            (if (and (not x) y)
-                (values y t)
-                (values x nil)))
-   :modify (lambda (node data)
-             (when data
-               (let* ((term (list data))
-                      (const (intern-enode (make-enode term))))
-                 (declare (dynamic-extent term))
-                 (enode-merge node const)
-                 (setf (egraph::eclass-info-nodes (enode-eclass-info node))
-                       (list const)))))))
+(define-analysis const
+  :make (lambda (fsym &rest args)
+          (if args
+              (block nil
+                (let ((args (mapcar (lambda (enode)
+                                      (or (get-analysis-data enode 'const)
+                                          (return)))
+                                    args)))
+                  ;; Guard against things like division by zero
+                  (ignore-errors
+                   (let* ((result (apply fsym args)))
+                     ;; Coerce integral float into integer
+                     (if (floatp result)
+                         (multiple-value-bind (int frac) (truncate result (float 1.0 result))
+                           (if (zerop frac) int result))
+                         result)))))
+              (when (numberp fsym)
+                fsym)))
+  :merge (lambda (x y)
+           (if (and (not x) y)
+               (values y t)
+               (values x nil)))
+  :modify (lambda (node data)
+            (when data
+              (let* ((term (list data))
+                     (const (intern-enode (make-enode term))))
+                (declare (dynamic-extent term))
+                (enode-merge node const)
+                (setf (egraph::eclass-info-nodes (enode-eclass-info node))
+                      (list const))))))
 
 (def-test analysis.const ()
-  (let* ((*egraph* (make-egraph :analyses *const-analysis*))
+  (let* ((*egraph* (make-egraph :analyses 'const))
          (a (intern-term '(+ 3 (+ 2 a))))
          (b (intern-term '(+ a 5)))
          (c (intern-term '(+ 2 (* 3 5)))))
@@ -215,31 +214,30 @@
     (is (eq (enode-find a) (enode-find b)))
     (is (equal 17 (greedy-extract c #'ast-size)))))
 
-(defvar *var-analysis*
-  (make-analysis-info
-   :make (lambda (fsym &rest args)
-           (when (and (not args) (symbolp fsym))
-             fsym))
-   :merge (lambda (x y)
-            (if (and (not x) y)
-                (values y t)
-                (values x nil)))))
+(define-analysis var
+  :make (lambda (fsym &rest args)
+          (when (and (not args) (symbolp fsym))
+            fsym))
+  :merge (lambda (x y)
+           (if (and (not x) y)
+               (values y t)
+               (values x nil))))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x *var-analysis*))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c *const-analysis*)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x *var-analysis*))
-                                                             (vc (get-analysis-data ?c *var-analysis*)))
+(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
+(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
+                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
+                                                             (vc (get-analysis-data ?c 'var)))
                                         (not (eq vx vc)))))
 
 (def-test analysis.multiple.1 ()
-  (let* ((*egraph* (make-egraph :analyses (list *var-analysis* *const-analysis*)))
+  (let* ((*egraph* (make-egraph :analyses '(var const)))
          (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
     (is (eq (enode-find (intern-term 1)) (enode-find a)))))
 
 (def-test analysis.multiple.2 ()
-  (let* ((*egraph* (make-egraph :analyses (list *const-analysis* *var-analysis*)))
+  (let* ((*egraph* (make-egraph :analyses '(const var)))
          (a (intern-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
@@ -289,7 +287,7 @@
 (def-test bench.analysis-ac ()
   (let ((timer (benchmark:make-timer)))
     (loop for i from 1 to 3 do
-      (let ((*egraph* (make-egraph :analyses *const-analysis*)))
+      (let ((*egraph* (make-egraph :analyses 'const)))
         (format t "~&Benchmark run ~a." i)
         (sb-ext:gc :full t)
         (intern-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))

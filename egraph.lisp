@@ -7,7 +7,7 @@
            #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses
            #:do-matches #:defrw #:intern-term #:run-rewrites
-           #:make-analysis-info #:get-analysis-data
+           #:define-analysis #:get-analysis-data
            #:greedy-extract #:cost))
 
 (in-package :egraph)
@@ -93,11 +93,18 @@ function symbol."
   (nodes nil :type list)
   (node-table (make-hash-table :test 'eq) :type hash-table))
 
+(defvar *analysis-info-registry* (make-hash-table))
+
 (defstruct analysis-info
   "Data for e-analysis."
+  (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type function)
   (merge (required-argument :merge) :type function)
-  (modify (constantly nil) :type function))
+  (modify (required-argument :modify) :type function))
+
+(defmacro define-analysis (name &key make merge (modify '(constantly nil)))
+  `(setf (gethash ',name *analysis-info-registry*)
+         (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify)))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
@@ -109,7 +116,11 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (classes (make-hash-table :test 'eq) :type hash-table)
   (fsym-table (make-hash-table) :type hash-table)
   (work-list nil :type list)
-  (analysis-info-list (ensure-list analyses) :type list)
+  (analysis-info-list
+   (mapcar (lambda (name) (or (gethash name *analysis-info-registry*)
+                              (error "No analysis named ~a." name)))
+           (ensure-list analyses))
+   :type list)
   (analysis-work-list nil :type list))
 
 (defvar *egraph*)
@@ -166,10 +177,10 @@ Only contains canonical enodes after `egraph-rebuild'."
             ;; modify hook might make ECLASS no longer representative
             (setf eclass (enode-find eclass)))))
 
-(-> get-analysis-data (enode analysis-info) t)
-(defun get-analysis-data (enode analysis-info)
+(-> get-analysis-data (enode symbol) t)
+(defun get-analysis-data (enode name)
   (svref (eclass-info-analysis-data-vec (enode-eclass-info enode))
-         (position analysis-info (egraph-analysis-info-list *egraph*))))
+         (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)))
 
 (-> make-enode (list) enode)
 (defun make-enode (term)
