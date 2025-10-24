@@ -2,13 +2,13 @@
     (:use #:cl #:alexandria)
   (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p)
   (:import-from #:bind #:bind)
-  (:export #:make-enode #:intern-enode #:enode-term #:make-egraph #:list-enodes
+  (:export #:make-enode #:enode-term #:make-egraph #:list-enodes
            #:enode-representative-p #:enode-canonical-p #:enode-eclass-info
            #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses
-           #:do-matches #:defrw #:intern-term #:run-rewrites
+           #:do-matches #:defrw #:make-term #:run-rewrites
            #:define-analysis #:get-analysis-data
-           #:greedy-extract #:cost))
+           #:greedy-extract))
 
 (in-package :egraph)
 
@@ -181,7 +181,6 @@ Only contains canonical enodes after `egraph-rebuild'."
   (svref (eclass-info-analysis-data-vec (enode-eclass-info enode))
          (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)))
 
-(-> make-enode (list) enode)
 (defun make-enode (term)
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
     (or (gethash term (egraph-hash-cons *egraph*))
@@ -194,16 +193,6 @@ Only contains canonical enodes after `egraph-rebuild'."
             (incf (eclass-info-n-parents (enode-parent arg))))
           (setf (gethash term (egraph-hash-cons *egraph*)) enode)
           (modify-analysis-data enode)))))
-
-(-> intern-enode (enode) enode)
-(defun intern-enode (enode)
-  (labels ((process (enode)
-             (let ((term (enode-term enode)))
-               (unless (gethash term (egraph-hash-cons *egraph*))
-                 (setf (gethash term (egraph-hash-cons *egraph*)) enode)
-                 (mapc #'process (cdr term))))))
-    (process enode)
-    enode))
 
 (-> enode-merge (enode enode) null)
 (defun enode-merge (x y)
@@ -236,7 +225,7 @@ Only contains canonical enodes after `egraph-rebuild'."
     (let ((enode (pop (egraph-work-list *egraph*))))
       (unless enode (return))
       (remhash (enode-term enode) (egraph-hash-cons *egraph*))
-      (enode-merge (intern-enode (make-enode (enode-term enode))) enode)))
+      (enode-merge (make-enode (enode-term enode)) enode)))
   ;; Update analysis
   (loop
     (let ((enode (pop (egraph-analysis-work-list *egraph*))))
@@ -407,24 +396,23 @@ TOP-NODE-VAR bound to the enode matching PAT."
                        *fsym-info-var-alist*)
            ,match-body))))
 
-(declaim (type function *apply-hook*))
-(defvar *apply-hook* #'enode-merge
-  "Function to apply a rewrite, receives two argument: LHS enode and (not yet
-interned) RHS enode.")
+(defvar *max-enodes* nil)
 
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
   `(defun ,name ()
      (do-matches (top-node ,lhs)
+       (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
+         (throw 'stop :max-enodes))
        (when ,guard
-         (funcall *apply-hook* top-node (intern-enode ,(expand-template rhs)))))))
+         (enode-merge top-node ,(expand-template rhs))))))
 
 ;;; Utils
 
-(defun intern-term (term)
+(defun make-term (term)
   (if (consp term)
-      (intern-enode (make-enode (cons (car term) (mapcar #'intern-term (cdr term)))))
-      (intern-enode (make-enode (list term)))))
+      (make-enode (cons (car term) (mapcar #'make-term (cdr term))))
+      (make-enode (list term))))
 
 (declaim (inline egraph-n-enodes egraph-n-eclasses))
 
@@ -434,7 +422,7 @@ interned) RHS enode.")
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (rules &key max-iter check max-enodes)
+(defun run-rewrites (rules &key max-iter check ((:max-enodes *max-enodes*)))
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
@@ -444,20 +432,12 @@ have added some terms to EGRAPH, you MUST call `egraph-rebuild' before calling
 this function."
   (let ((n-enodes (egraph-n-enodes *egraph*))
         (n-eclasses (egraph-n-eclasses *egraph*))
-        (n-iter 0)
-        (*apply-hook* *apply-hook*))
-    (when max-enodes
-      (setq *apply-hook*
-            (let ((old-hook *apply-hook*))
-              (lambda (lhs rhs)
-                (if (>= (egraph-n-enodes *egraph*) max-enodes)
-                    (throw 'stop :max-enodes)
-                    (funcall old-hook lhs rhs))))))
+        (n-iter 0))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))
           (throw 'stop :max-iter))
-        (when (and max-enodes (>= n-enodes max-enodes))
+        (when (and *max-enodes* (>= n-enodes *max-enodes*))
           (throw 'stop :max-enodes))
         (unwind-protect
              (dolist (rule (ensure-list rules))

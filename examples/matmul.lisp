@@ -44,7 +44,7 @@
 
 (def-test matmul.1 ()
   (let* ((*egraph* (make-egraph :analyses '(shape cost)))
-         (a (intern-term
+         (a (make-term
              (make-matmul-term '(10 14 12 9 13 16 1 6 13 14 7 7 3 14 15 15 19 12 19 8)))))
     (egraph-rebuild)
     (is (eq :saturate (run-rewrites 'assoc-matmul)))

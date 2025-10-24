@@ -31,7 +31,7 @@
   :modify (lambda (node data)
             (when data
               (let* ((term (list data))
-                     (const (intern-enode (make-enode term))))
+                     (const (make-enode term)))
                 (declare (dynamic-extent term))
                 (enode-merge node const)
                 (setf (egraph::eclass-info-nodes (enode-eclass-info node))
@@ -110,17 +110,17 @@
 
 (defvar *math-rules* (append *math-base-rules* *math-diff-rules* *math-integral-rules*))
 
-(defun ast-size-no-d-or-i (enode arg-costs)
+(defun ast-size-no-d-or-i (fsym arg-costs)
   (when (every #'identity arg-costs)
-    (+ (if (member (car (enode-term enode)) '(d i)) 100 1) (reduce #'+ arg-costs))))
+    (+ (if (member fsym '(d i)) 100 1) (reduce #'+ arg-costs))))
 
 (defmacro def-math-test (name () lhs rhs)
   `(def-test ,name ()
      (let* ((*egraph* (make-egraph :analyses '(var const)))
-            (lhs (intern-term ',lhs)))
+            (lhs (make-term ',lhs)))
        (egraph-rebuild)
        (run-rewrites *math-rules* :max-enodes 5000)
-       (is (eq (enode-find (intern-term ',rhs)) (enode-find lhs))))))
+       (is (eq (enode-find (make-term ',rhs)) (enode-find lhs))))))
 
 (def-math-test math.simplify-root ()
   (/ 1 (- (/ (+ 1 (sqrt five)) 2)
@@ -135,8 +135,8 @@
 
 (def-test math.diff-power-harder ()
   (let* ((*egraph* (make-egraph :analyses '(var const)))
-         (a (intern-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
-         (b (intern-term '(* x (- (* 3 x) 14)))))
+         (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
+         (b (make-term '(* x (- (* 3 x) 14)))))
     (run-rewrites *math-rules* :max-enodes 5000)
     (is (eq (enode-find b) (enode-find a)))))
 
@@ -146,7 +146,7 @@
       (let ((*egraph* (make-egraph :analyses '(var const))))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
-        (intern-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
+        (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
           (run-rewrites *math-rules* :max-enodes 50000))))
