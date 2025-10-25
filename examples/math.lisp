@@ -137,6 +137,7 @@
   (let* ((*egraph* (make-egraph :analyses '(var const)))
          (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
          (b (make-term '(* x (- (* 3 x) 14)))))
+    (egraph-rebuild)
     (run-rewrites *math-rules* :max-enodes 5000)
     (is (eq (enode-find b) (enode-find a)))))
 
