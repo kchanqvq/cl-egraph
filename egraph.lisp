@@ -461,7 +461,7 @@ COST-FN should accept 2 arguments: the enode and a list of costs for each
 argument eclass. It should return a number.
 
 ENODE can also be a list of enodes, and a list of terms will be returned."
-  (let ((selections (make-hash-table))) ;; map eclass to (cost . enode)
+  (let ((selections (make-hash-table))) ; map eclass to (cost . enode)
     (loop
       (let (dirty)
         (maphash-keys (lambda (class)
@@ -479,11 +479,14 @@ ENODE can also be a list of enodes, and a list of terms will be returned."
                           (setf (gethash class selections) selection)))
                       (egraph-classes *egraph*))
         (unless dirty (return))))
-    (labels ((build-term (class)
-               (let ((term (enode-term (cdr (gethash class selections)))))
-                 (if (cdr term)
-                     (cons (car term) (mapcar #'build-term (cdr term)))
-                     (car term)))))
-      (if (listp enode)
-          (mapcar (compose #'build-term #'enode-find) enode)
-          (build-term (enode-find enode))))))
+    (let ((build-term-memo (make-hash-table))) ; used to preserve sharing
+      (labels ((build-term (class)
+                 (ensure-gethash
+                  class build-term-memo
+                  (let ((term (enode-term (cdr (gethash class selections)))))
+                    (if (cdr term)
+                        (cons (car term) (mapcar #'build-term (cdr term)))
+                        (car term))))))
+        (if (listp enode)
+            (mapcar (compose #'build-term #'enode-find) enode)
+            (build-term (enode-find enode)))))))
