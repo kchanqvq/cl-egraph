@@ -410,9 +410,10 @@ TOP-NODE-VAR bound to the enode matching PAT."
 ;;; Utils
 
 (defun make-term (term)
-  (if (consp term)
-      (make-enode (cons (car term) (mapcar #'make-term (cdr term))))
-      (make-enode (list term))))
+  (typecase term
+    (cons (make-enode (cons (car term) (mapcar #'make-term (cdr term)))))
+    (enode term)
+    (t (make-enode (list term)))))
 
 (declaim (inline egraph-n-enodes egraph-n-eclasses))
 
