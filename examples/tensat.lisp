@@ -89,7 +89,7 @@
     (when (or (> stride-h 1) (not (= input-dim (* out-channels 2))))
       (let ((w4 (make-term (list 'weight (* out-channels 2) input-dim 1 1))))
         (setq input (make-term (list 'conv2d stride-h stride-w 'psame 'actnone input w4)))))
-    (make-term (list 'actrelu (list 'add input tmp)))))
+    (make-term (list 'relu (list 'add input tmp)))))
 
 (defun resnext-50 ()
   (let* ((input (make-term (list 'input 1 3 224 224)))
