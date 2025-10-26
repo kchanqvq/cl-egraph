@@ -60,8 +60,8 @@
   '(EWADD-IS-ASSOCIATIVE -EWADD-IS-ASSOCIATIVE EWADD-IS-COMMUNITATIVE -EWADD-IS-COMMUNITATIVE EWMUL-IS-ASSOCIATIVE
     -EWMUL-IS-ASSOCIATIVE EWMUL-IS-COMMUNITATIVE -EWMUL-IS-COMMUNITATIVE DISTRIBUTIVE-0
     -DISTRIBUTIVE-0 SMUL-IS-ASSOCIATIVE -SMUL-IS-ASSOCIATIVE DISTRIBUTIVE-1 -DISTRIBUTIVE-1
-    OPERATOR-COMMUTATIVITY-0 -OPERATOR-COMMUTATIVITY-0 TRANSPOSE-IS-ITS-OWN-INVERSE
-    -TRANSPOSE-IS-ITS-OWN-INVERSE OPERATOR-COMMUTATIVITY-1 -OPERATOR-COMMUTATIVITY-1
+    OPERATOR-COMMUTATIVITY-0 -OPERATOR-COMMUTATIVITY-0 #+nil TRANSPOSE-IS-ITS-OWN-INVERSE
+    #+nil -TRANSPOSE-IS-ITS-OWN-INVERSE OPERATOR-COMMUTATIVITY-1 -OPERATOR-COMMUTATIVITY-1
     OPERATOR-COMMUTATIVITY-2 -OPERATOR-COMMUTATIVITY-2 OPERATOR-COMMUTATIVITY-3
     -OPERATOR-COMMUTATIVITY-3 MATMUL-IS-ASSOCIATIVE -MATMUL-IS-ASSOCIATIVE MATMUL-IS-LINEAR-0
     -MATMUL-IS-LINEAR-0 MATMUL-IS-LINEAR-1 -MATMUL-IS-LINEAR-1 MATMUL-AND-TRANSPOSE
@@ -70,7 +70,7 @@
     -CONV-IS-BILINEAR-3 -ENLARGE-CONVOLUTION-KERNEL OPERATOR-COMMUTATIVITY-4
     -OPERATOR-COMMUTATIVITY-4 CONV-WITH-2-APPLIES-ACTRELU -CONV-WITH-2-APPLIES-ACTRELU
     -POOLING-BY-CONV.-WITH-CPOOL CONST-ICONV-AND-CONST-POOL -CONST-ICONV-AND-CONST-POOL
-    IDENTITY-KERNEL IDENTITY-MATRIX -IDENTITY-MATRIX EWMUL-IDENTITY -EWMUL-IDENTITY
+    IDENTITY-KERNEL IDENTITY-MATRIX -IDENTITY-MATRIX #+nil EWMUL-IDENTITY #+nil -EWMUL-IDENTITY
     SPLIT-DEFINITION-0 SPLIT-DEFINITION-1 GEOMETRY-OF-CONCATENATION -GEOMETRY-OF-CONCATENATION
     OPERATOR-COMMUTATIVITY-5 -OPERATOR-COMMUTATIVITY-5 OPERATOR-COMMUTATIVITY-6
     -OPERATOR-COMMUTATIVITY-6 OPERATOR-COMMUTATIVITY-7 -OPERATOR-COMMUTATIVITY-7
@@ -107,7 +107,17 @@
                               ((kernel-h kernel-w stride-h stride-w) (mapcar #'enode-value (subseq args 0 4))))
                          (list* input-0 input-1
                                 (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
-              ((relu add)
+              (concat
+               (let ((axis (enode-value (car args)))
+                     (xdims (get-analysis-data (nth 1 args) 'shape))
+                     (ydims (get-analysis-data (nth 2 args) 'shape)))
+                 (assert (= (length xdims) (length ydims)))
+                 (loop for i from 0
+                       for xdim in xdims
+                       for ydim in ydims
+                       collect (if (= i axis) (+ xdim ydim)
+                                   (progn (assert (= xdim ydim)) xdim)))))
+              ((relu ewadd)
                (lret ((shape (get-analysis-data (car args) 'shape)))
                  (dolist (arg (cdr args))
                    (assert (equal shape (get-analysis-data arg 'shape)))))))))
@@ -128,7 +138,7 @@
     (when (or (> stride-h 1) (not (= input-dim (* out-channels 2))))
       (let ((w4 (make-term (list 'weight (* out-channels 2) input-dim 1 1))))
         (setq input (make-term (list 'conv2d stride-h stride-w 'psame 'actnone input w4)))))
-    (make-term (list 'relu (list 'add input tmp)))))
+    (make-term (list 'relu (list 'ewadd input tmp)))))
 
 (defun resnext-50 ()
   (let* ((input (make-term (list 'input 1 3 224 224)))
