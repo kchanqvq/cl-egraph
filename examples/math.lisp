@@ -161,3 +161,13 @@
 
 (def-math-test math.integral-part.3 ()
   (i (ln x) x) (- (* x (ln x)) x))
+
+(def-test math.lp-extract ()
+  (let* ((*egraph* (make-egraph :analyses '(var const)))
+         (a (make-term '(pow (+ x (+ x x)) (+ x x)))))
+    (egraph-rebuild)
+    (run-rewrites *math-rules* :max-enodes 5000)
+    (is (equal '(pow (* 3 x) (+ x x))
+               (greedy-extract a #'ast-size-no-d-or-i)))
+    (is (equal '(pow (+ x (+ x x)) (+ x x))
+               (lp-extract a (constantly 1))))))

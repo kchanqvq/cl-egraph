@@ -8,7 +8,9 @@
                :metabang-bind
                :cl-custom-hash-table
                :global-vars
-               :trivial-garbage)
+               :trivial-garbage
+               :trivial-package-local-nicknames
+               :linear-programming)
   :components ((:file "egraph"))
   :in-order-to ((test-op (test-op "egraph/tests"))))
 
