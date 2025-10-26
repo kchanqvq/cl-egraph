@@ -1,5 +1,8 @@
 (uiop:define-package :egraph/examples/tensat
-    (:use #:cl #:egraph))
+    (:use #:cl #:egraph)
+  (:import-from #:alexandria #:compose)
+  (:import-from #:bind #:bind)
+  (:import-from #:serapeum #:lret))
 
 (in-package :egraph/examples/tensat)
 
@@ -79,6 +82,42 @@
     -CONCATENATION-AND-POOLING-0 CONCATENATION-AND-POOLING-1 -CONCATENATION-AND-POOLING-1
     CONCATENATION-AND-POOLING-2 -CONCATENATION-AND-POOLING-2))
 
+(defun compute-pad-dims (pmode input-h input-w stride-h stride-w kernel-h kernel-w)
+  (ecase pmode
+    (psame (list (floor (1- (+ input-h stride-h)) stride-h)
+                 (floor (1- (+ input-w stride-w)) stride-w)))
+    (pvalid (list (1+ (floor (- input-h kernel-h) stride-h))
+                  (1+ (floor (- input-w kernel-w) stride-w))))))
+
+(define-analysis shape
+  :make (lambda (fsym &rest args)
+          (flet ((enode-value (enode)
+                     (assert (null (cdr (enode-term enode))))
+                     (car (enode-term enode))))
+            (case fsym
+              ((input weight) (mapcar #'enode-value args))
+              (conv2d
+               (bind (((stride-h stride-w pmode) (mapcar #'enode-value (subseq args 0 3)))
+                      ((input-0 _ input-h input-w) (get-analysis-data (nth 4 args) 'shape))
+                      ((kernel-0 _ kernel-h kernel-w) (get-analysis-data (nth 5 args) 'shape)))
+                 (list* input-0 kernel-0
+                        (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
+              (poolmax (bind ((pmode (car (enode-term (nth 4 args))))
+                              ((input-0 input-1 input-h input-w) (get-analysis-data (nth 5 args) 'shape))
+                              ((kernel-h kernel-w stride-h stride-w) (mapcar #'enode-value (subseq args 0 4))))
+                         (list* input-0 input-1
+                                (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
+              ((relu add)
+               (lret ((shape (get-analysis-data (car args) 'shape)))
+                 (dolist (arg (cdr args))
+                   (assert (equal shape (get-analysis-data arg 'shape)))))))))
+  :merge (lambda (x y)
+           (if (and (not x) y)
+               (values y t)
+               (progn
+                 (when (and x y) (assert (equal x y)))
+                 (values x nil)))))
+
 (defun resnext-block (input stride-h stride-w out-channels input-dim groups)
   (let* ((w1 (make-term (list 'weight out-channels input-dim 1 1)))
          (tmp (make-term (list 'conv2d 1 1 'psame 'actrelu input w1)))
@@ -108,3 +147,8 @@
       (cfg-blocks 6 2 2 512)
       (cfg-blocks 3 2 2 1024))
     tmp))
+
+#+nil (let* ((*egraph* (make-egraph :analyses 'shape))
+       (a (resnext-50)))
+  (egraph-rebuild)
+  (get-analysis-data a 'shape))
