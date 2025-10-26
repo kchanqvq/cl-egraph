@@ -10,8 +10,9 @@
            #:define-analysis #:get-analysis-data
            #:greedy-extract #:lp-extract))
 
-(trivial-package-local-nicknames:add-package-local-nickname
- '#:lp '#:linear-programming '#:egraph)
+(serapeum:eval-always
+  (trivial-package-local-nicknames:add-package-local-nickname
+   '#:lp '#:linear-programming '#:egraph))
 
 (in-package :egraph)
 

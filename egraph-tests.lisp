@@ -265,7 +265,7 @@
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
-        (sb-ext:gc :full t)
+        (trivial-garbage:gc :full t)
         (make-term '(i x (ln x)))
         (make-term '(i x (+ x (cos x))))
         (make-term '(i x (* (cos x) x)))
