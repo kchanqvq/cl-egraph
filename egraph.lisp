@@ -110,7 +110,7 @@ function symbol."
   `(setf (gethash ',name *analysis-info-registry*)
          (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify)))
 
-(defstruct (egraph (:constructor make-egraph (&key analyses)))
+(defstruct (egraph (:constructor make-egraph (&key analyses enode-limit)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
 eclass (i.e. representative enodes). FSYM-TABLE stores a `fsym-info' entry for
 every encountered function symbol.
@@ -125,7 +125,8 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
                               (error "No analysis named ~a." name)))
            (ensure-list analyses))
    :type list)
-  (analysis-work-list nil :type list))
+  (analysis-work-list nil :type list)
+  (enode-limit array-total-size-limit :type positive-fixnum))
 
 (defvar *egraph*)
 (setf (documentation '*egraph* 'variable) "Current egraph under operation.")
@@ -189,6 +190,9 @@ Only contains canonical enodes after `egraph-rebuild'."
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
     (or (gethash term (egraph-hash-cons *egraph*))
         (lret ((enode (%make-enode :term term)))
+          (unless (< (hash-table-count (egraph-hash-cons *egraph*))
+                     (egraph-enode-limit *egraph*))
+            (throw 'stop :max-enodes))
           (setf (enode-parent enode)
                 (%make-eclass-info :nodes (list enode)
                                    :analysis-data-vec (make-analysis-data enode)))
@@ -400,14 +404,10 @@ TOP-NODE-VAR bound to the enode matching PAT."
                        *fsym-info-var-alist*)
            ,match-body))))
 
-(defvar *max-enodes* nil)
-
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
   `(defun ,name ()
      (do-matches (top-node ,lhs)
-       (when (and *max-enodes* (>= (egraph-n-enodes *egraph*) *max-enodes*))
-         (throw 'stop :max-enodes))
        (when ,guard
          (enode-merge top-node ,(expand-template rhs))))))
 
@@ -427,7 +427,7 @@ TOP-NODE-VAR bound to the enode matching PAT."
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (rules &key max-iter check ((:max-enodes *max-enodes*)))
+(defun run-rewrites (rules &key max-iter check (max-enodes array-total-size-limit))
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
@@ -438,12 +438,11 @@ this function."
   (let ((n-enodes (egraph-n-enodes *egraph*))
         (n-eclasses (egraph-n-eclasses *egraph*))
         (n-iter 0))
+    (setf (egraph-enode-limit *egraph*) max-enodes)
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))
-          (throw 'stop :max-iter))
-        (when (and *max-enodes* (>= n-enodes *max-enodes*))
-          (throw 'stop :max-enodes))
+          (return :max-iter))
         (unwind-protect
              (dolist (rule (ensure-list rules))
                (funcall rule))
