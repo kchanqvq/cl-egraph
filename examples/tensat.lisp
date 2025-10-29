@@ -148,6 +148,16 @@
                  (when (and x y) (assert (equal x y)))
                  (values x nil)))))
 
+(defun conv2d-helper (args)
+ (flet ((enode-value (enode)
+                     (assert (null (cdr (enode-term enode))))
+                     (car (enode-term enode))))
+    (bind (((stride-h stride-w pmode) (mapcar #'enode-value (subseq args 0 3)))
+           ((input-0 _ input-h input-w) (get-analysis-data (nth 4 args) 'shape))
+           ((kernel-0 _ kernel-h kernel-w) (get-analysis-data (nth 5 args) 'shape)))
+      (list* input-0 kernel-0
+             (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w)))))
+
 (define-analysis cost
   :make (lambda (fsym &rest args)
           (case fsym
@@ -157,9 +167,11 @@
               (let* ((lhs (get-analysis-data (car args) 'shape))
                     (rhs (get-analysis-data (car (last args)) 'shape)))
                     (* (reduce #'* (append lhs (last rhs))))))
-            ;; TODO
-            ; ((conv2d) ...)
-            (otherwise (reduce #'max (mapcar (lambda (e) (get-analysis-data e 'cost)) args) :initial-value 0))))
+            ;; FIXME: Somehow adding this does not affect the cost of resnext-50...
+            ((conv2d) (let* ((output (conv2d-helper args))
+                            (kernel (get-analysis-data (car (last args)) 'shape)))
+                        (reduce #'* (append output (nthcdr 2 kernel)))))
+            (otherwise (reduce #'+ (mapcar (lambda (e) (get-analysis-data e 'cost)) args) :initial-value 0))))
   :merge (lambda (x y) (min x y)))
 
 (defun resnext-block (input stride-h stride-w out-channels input-dim groups)
@@ -198,10 +210,11 @@
   (shape a))
 
 (let* ((*egraph* (make-egraph :analyses '(shape cost)))
-      (input (list 'input 2 3))
-      (weight (list 'weight 3 5))
+      (input (list 'input 1 3 224 224))
+      (weight (list 'weight 64 3 7 7))
       (add (make-term (list 'ewmul input input)))
-      (matmul (make-term (list 'matmul input weight))))
+      (matmul (make-term (list 'matmul input weight)))
+      (conv (make-term (list 'conv2d 1 1 'psame 'actrelu input weight))))
   (egraph-rebuild)
   (assert (= 6 (cost add)))
   (assert (= 30 (cost matmul))))
