@@ -56,6 +56,13 @@
 (defrw2 concatenation-and-pooling-1 (concat 0 (poolmax ?kx ?ky ?sx ?sy ?p ?x) (poolmax ?kx ?ky ?sx ?sy ?p ?y)) (poolmax ?kx ?ky ?sx ?sy ?p (concat 0 ?x ?y)))
 (defrw2 concatenation-and-pooling-2 (concat 1 (poolmax ?kx ?ky ?sx ?sy ?p ?x) (poolmax ?kx ?ky ?sx ?sy ?p ?y)) (poolmax ?kx ?ky ?sx ?sy ?p (concat 1 ?x ?y)))
 
+(defun gen-split ()
+  (do-matches (x ?x)
+    (do-matches (y ?y)
+      (let ((concat-node (make-enode (list 'concat (make-enode '(0)) x y))))
+        (enode-merge x (make-enode (list 'split_0 (make-enode '(0)) concat-node)))
+        (enode-merge y (make-enode (list 'split_0 (make-enode '(0)) concat-node)))))))
+
 (defvar *tensat-rules*
   '(EWADD-IS-ASSOCIATIVE -EWADD-IS-ASSOCIATIVE EWADD-IS-COMMUNITATIVE -EWADD-IS-COMMUNITATIVE EWMUL-IS-ASSOCIATIVE
     -EWMUL-IS-ASSOCIATIVE EWMUL-IS-COMMUNITATIVE -EWMUL-IS-COMMUNITATIVE DISTRIBUTIVE-0

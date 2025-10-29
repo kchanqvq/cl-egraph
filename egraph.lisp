@@ -389,11 +389,9 @@ evaluate CONT-EXPR."
 BODY is evaluated with variables in PAT bound to matched eclasses and
 TOP-NODE-VAR bound to the enode matching PAT."
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
-      `(maphash-values
-        (lambda (fsym-info)
-          (dolist (,pat (fsym-info-nodes fsym-info))
-            (let ((,top-node-var ,pat)) ,@body)))
-        (egraph-fsym-table *egraph*))
+      `(maphash-keys
+        (lambda (,pat) (let ((,top-node-var ,pat)) ,@body))
+        (egraph-classes *egraph*))
       (let* ((*fsym-info-var-alist* nil)
              (match-body
                (expand-match nil (parse-pattern pat top-node-var)
