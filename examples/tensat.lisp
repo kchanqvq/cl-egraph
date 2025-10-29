@@ -159,7 +159,7 @@
                     (* (reduce #'* (append lhs (last rhs))))))
             ;; TODO
             ; ((conv2d) ...)
-            (otherwise 0)))
+            (otherwise (reduce #'max (mapcar (lambda (e) (get-analysis-data e 'cost)) args) :initial-value 0))))
   :merge (lambda (x y) (min x y)))
 
 (defun resnext-block (input stride-h stride-w out-channels input-dim groups)
@@ -192,7 +192,7 @@
       (cfg-blocks 3 2 2 1024))
     tmp))
 
-#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
+(let* ((*egraph* (make-egraph :analyses '(shape cost)))
        (a (resnext-50)))
   (egraph-rebuild)
   (shape a))
