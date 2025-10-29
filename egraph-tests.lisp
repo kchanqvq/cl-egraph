@@ -177,8 +177,7 @@
           (if args
               (block nil
                 (let ((args (mapcar (lambda (enode)
-                                      (or (get-analysis-data enode 'const)
-                                          (return)))
+                                      (or (const enode) (return)))
                                     args)))
                   ;; Guard against things like division by zero
                   (ignore-errors
@@ -223,10 +222,10 @@
                (values y t)
                (values x nil))))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
-                                                             (vc (get-analysis-data ?c 'var)))
+(defrw d-var (d ?x ?x) 1 :guard (var ?x))
+(defrw d-const (d ?x ?c) 0 :guard (or (const ?c)
+                                      (alexandria:when-let* ((vx (var ?x))
+                                                             (vc (var ?c)))
                                         (not (eq vx vc)))))
 
 (def-test analysis.multiple.1 ()

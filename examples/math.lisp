@@ -11,7 +11,7 @@
           (if args
               (block nil
                 (let ((args (mapcar (lambda (enode)
-                                      (or (get-analysis-data enode 'const)
+                                      (or (const enode)
                                           (return)))
                                     args)))
                   ;; Guard against things like division by zero
@@ -52,7 +52,7 @@
 (defrw assoc-mul (* ?a (* ?b ?c)) (* (* ?a ?b) ?c))
 
 (defrw sub-canon (- ?a ?b) (+ ?a (* -1 ?b)))
-(defrw div-canon (/ ?a ?b) (* ?a (pow ?b -1)) :guard (not (eql 0 (get-analysis-data ?b 'const))))
+(defrw div-canon (/ ?a ?b) (* ?a (pow ?b -1)) :guard (not (eql 0 (const ?b))))
 
 (defrw add-0 (+ ?a 0) ?a)
 (defrw mul-0 (* ?a 0) 0)
@@ -62,17 +62,17 @@
 (defrw -mul-1 ?a (* ?a 1))
 
 (defrw sub-cancel (- ?a ?a) 0)
-(defrw div-cancel (/ ?a ?a) 1 :guard (not (eql 0 (get-analysis-data ?a 'const))))
+(defrw div-cancel (/ ?a ?a) 1 :guard (not (eql 0 (const ?a))))
 
 (defrw distribute (* ?a (+ ?b ?c)) (+ (* ?a ?b) (* ?a ?c)))
 (defrw factor (+ (* ?a ?b) (* ?a ?c)) (* ?a (+ ?b ?c)))
 
 (defrw pow-mul (* (pow ?a ?b) (pow ?a ?c)) (pow ?a (+ ?b ?c)))
-(defrw pow-0 (pow ?a 0) 1 :guard (not (eql 0 (get-analysis-data ?a 'const))))
+(defrw pow-0 (pow ?a 0) 1 :guard (not (eql 0 (const ?a))))
 (defrw pow-1 (pow ?a 1) ?a)
 (defrw pow-2 (pow ?a 2) (* ?a ?a))
-(defrw pow-recip (pow ?a -1) (/ 1 ?a) :guard (not (eql 0 (get-analysis-data ?a 'const))))
-(defrw recip-mul-div (* ?x (/ 1 ?x)) 1 :guard (not (eql 0 (get-analysis-data ?x 'const))))
+(defrw pow-recip (pow ?a -1) (/ 1 ?a) :guard (not (eql 0 (const ?a))))
+(defrw recip-mul-div (* ?x (/ 1 ?x)) 1 :guard (not (eql 0 (const ?x))))
 
 (declaim (inline pow))
 (defun pow (x y) (expt x y))
@@ -81,25 +81,25 @@
   '(COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
     DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV))
 
-(defrw d-var (d ?x ?x) 1 :guard (get-analysis-data ?x 'var))
-(defrw d-const (d ?x ?c) 0 :guard (or (get-analysis-data ?c 'const)
-                                      (alexandria:when-let* ((vx (get-analysis-data ?x 'var))
-                                                             (vc (get-analysis-data ?c 'var)))
+(defrw d-var (d ?x ?x) 1 :guard (var ?x))
+(defrw d-const (d ?x ?c) 0 :guard (or (const ?c)
+                                      (alexandria:when-let* ((vx (var ?x))
+                                                             (vc (var ?c)))
                                         (not (eq vx vc)))))
 (defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
 (defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
 (defrw d-sin (d ?x (sin ?x)) (cos ?x))
 (defrw d-cos (d ?x (cos ?x)) (* -1 (sin ?x)))
-(defrw d-ln (d ?x (ln ?x)) (/ 1 ?x) :guard (not (eql 0 (get-analysis-data ?x 'const))))
+(defrw d-ln (d ?x (ln ?x)) (/ 1 ?x) :guard (not (eql 0 (const ?x))))
 (defrw d-pow (d ?x (pow ?f ?g)) (* (pow ?f ?g) (+ (* (d ?x ?f) (/ ?g ?f)) (* (d ?x ?g) (ln ?f))))
-  :guard (and (not (eql 0 (get-analysis-data ?f 'const)))
-              (not (eql 0 (get-analysis-data ?g 'const)))))
+  :guard (and (not (eql 0 (const ?f)))
+              (not (eql 0 (const ?g)))))
 
 (defvar *math-diff-rules* '(D-VAR D-CONST D-ADD D-MUL D-SIN D-COS D-LN D-POW))
 
 (defrw i-one (i 1 ?x) ?x)
 (defrw i-pow-const (i (pow ?x ?c) ?x)
-  (/ (pow ?x (+ ?c 1)) (+ ?c 1)) :guard (get-analysis-data ?c 'const))
+  (/ (pow ?x (+ ?c 1)) (+ ?c 1)) :guard (const ?c))
 (defrw i-cos (i (cos ?x) ?x) (sin ?x))
 (defrw i-sin (i (sin ?x) ?x) (* -1 (cos ?x)))
 (defrw i-sum (i (+ ?f ?g) ?x) (+ (i ?f ?x) (i ?g ?x)))

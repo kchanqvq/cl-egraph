@@ -12,8 +12,8 @@
 (define-analysis shape
   :make (lambda (fsym &rest args)
           (case fsym
-            (matmul (list (car (get-analysis-data (car args) 'shape))
-                          (cadr (get-analysis-data (cadr args) 'shape))))
+            (matmul (list (car (shape (car args)))
+                          (cadr (shape (cadr args)))))
             (mat (mapcar (compose #'car #'enode-term) args))))
   :merge (lambda (x y)
            (if (and (not x) y)
@@ -23,10 +23,10 @@
 (define-analysis cost
   :make (lambda (fsym &rest args)
           (case fsym
-            (matmul (+ (get-analysis-data (car args) 'cost)
-                       (get-analysis-data (cadr args) 'cost)
-                       (let ((mn (get-analysis-data (car args) 'shape))
-                             (nk (get-analysis-data (cadr args) 'shape)))
+            (matmul (+ (cost (car args))
+                       (cost (cadr args))
+                       (let ((mn (shape (car args)))
+                             (nk (shape (cadr args))))
                          (* (car mn) (cadr mn) (cadr nk)))))
             (mat 0)))
   :merge (lambda (x y) (if (< y x) (values y t) (values x nil))))
@@ -46,4 +46,4 @@
              (make-matmul-term '(10 14 12 9 13 16 1 6 13 14 7 7 3 14 15 15 19 12 19 8)))))
     (egraph-rebuild)
     (is (eq :saturate (run-rewrites 'assoc-matmul)))
-    (is (= 2619 (get-analysis-data a 'cost)))))
+    (is (= 2619 (cost a)))))

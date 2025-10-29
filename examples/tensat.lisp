@@ -1,10 +1,14 @@
 (uiop:define-package :egraph/examples/tensat
     (:use #:cl #:egraph)
-  (:import-from #:alexandria #:compose)
+  (:import-from #:alexandria #:compose #:map-iota)
   (:import-from #:bind #:bind)
   (:import-from #:serapeum #:lret))
 
 (in-package :egraph/examples/tensat)
+
+(defun enode-value (enode)
+  (assert (null (cdr (enode-term enode))))
+  (car (enode-term enode)))
 
 (defmacro defrw2 (name lhs rhs)
   `(progn
@@ -39,8 +43,8 @@
 (defrw identity-kernel (conv2d 1 1 psame actnone ?x (iconv ?kx ?ky)) ?x)
 (defrw2 identity-matrix (matmul ?x imatmul) ?x)
 (defrw2 ewmul-identity (ewmul ?x iewmul) ?x)
-(defrw split-definition-0 (split_0 ?a (concat ?a ?x ?y)) ?x)
-(defrw split-definition-1 (split_1 ?a (concat ?a ?x ?y)) ?y)
+(defrw split-definition-0 (split-0 ?a ?n (concat ?a ?x ?y)) ?x)
+(defrw split-definition-1 (split-1 ?a ?n (concat ?a ?x ?y)) ?y)
 (defrw2 geometry-of-concatenation (concat 0 (concat 1 ?x ?y) (concat 1 ?z ?w)) (concat 1 (concat 0 ?x ?z) (concat 0 ?y ?w)))
 (defrw2 operator-commutativity-5 (concat ?a (smul ?x ?w) (smul ?y ?w)) (smul (concat ?a ?x ?y) ?w))
 (defrw2 operator-commutativity-6 (concat ?a (ewadd ?x ?y) (ewadd ?z ?w)) (ewadd (concat ?a ?x ?z) (concat ?a ?y ?w)))
@@ -59,9 +63,20 @@
 (defun gen-split ()
   (do-matches (x ?x)
     (do-matches (y ?y)
-      (let ((concat-node (make-enode (list 'concat (make-enode '(0)) x y))))
-        (enode-merge x (make-enode (list 'split_0 (make-enode '(0)) concat-node)))
-        (enode-merge y (make-enode (list 'split_0 (make-enode '(0)) concat-node)))))))
+      (let ((xs (shape x))
+            (ys (shape y)))
+        (flet ((gen-concat (axis)
+                 (let* ((concat (make-enode (list 'concat (make-enode (list axis)) x y)))
+                        (n (make-enode (list (nth axis xs))))
+                        (axis (make-enode (list axis))))
+                   (enode-merge x (make-enode (list 'split-0 axis n concat)))
+                   (enode-merge y (make-enode (list 'split-1 axis n concat))))))
+          (when (= (length xs) (length ys))
+            (let* ((matchps (mapcar #'= xs ys))
+                   (n-unmatch (count nil matchps)))
+              (case n-unmatch
+                (0 (map-iota #'gen-concat (length xs)))
+                (1 (gen-concat (position nil matchps)))))))))))
 
 (defvar *tensat-rules*
   '(EWADD-IS-ASSOCIATIVE -EWADD-IS-ASSOCIATIVE EWADD-IS-COMMUNITATIVE -EWADD-IS-COMMUNITATIVE EWMUL-IS-ASSOCIATIVE
@@ -98,36 +113,33 @@
 
 (define-analysis shape
   :make (lambda (fsym &rest args)
-          (flet ((enode-value (enode)
-                     (assert (null (cdr (enode-term enode))))
-                     (car (enode-term enode))))
-            (case fsym
-              ((input weight) (mapcar #'enode-value args))
-              (conv2d
-               (bind (((stride-h stride-w pmode) (mapcar #'enode-value (subseq args 0 3)))
-                      ((input-0 _ input-h input-w) (get-analysis-data (nth 4 args) 'shape))
-                      ((kernel-0 _ kernel-h kernel-w) (get-analysis-data (nth 5 args) 'shape)))
-                 (list* input-0 kernel-0
-                        (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
-              (poolmax (bind ((pmode (car (enode-term (nth 4 args))))
-                              ((input-0 input-1 input-h input-w) (get-analysis-data (nth 5 args) 'shape))
-                              ((kernel-h kernel-w stride-h stride-w) (mapcar #'enode-value (subseq args 0 4))))
-                         (list* input-0 input-1
-                                (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
-              (concat
-               (let ((axis (enode-value (car args)))
-                     (xdims (get-analysis-data (nth 1 args) 'shape))
-                     (ydims (get-analysis-data (nth 2 args) 'shape)))
-                 (assert (= (length xdims) (length ydims)))
-                 (loop for i from 0
-                       for xdim in xdims
-                       for ydim in ydims
-                       collect (if (= i axis) (+ xdim ydim)
-                                   (progn (assert (= xdim ydim)) xdim)))))
-              ((relu ewadd)
-               (lret ((shape (get-analysis-data (car args) 'shape)))
-                 (dolist (arg (cdr args))
-                   (assert (equal shape (get-analysis-data arg 'shape)))))))))
+          (case fsym
+            ((input weight) (mapcar #'enode-value args))
+            (conv2d
+             (bind (((stride-h stride-w pmode) (mapcar #'enode-value (subseq args 0 3)))
+                    ((input-0 _ input-h input-w) (shape (nth 4 args)))
+                    ((kernel-0 _ kernel-h kernel-w) (shape (nth 5 args))))
+               (list* input-0 kernel-0
+                      (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
+            (poolmax (bind ((pmode (car (enode-term (nth 4 args))))
+                            ((input-0 input-1 input-h input-w) (shape (nth 5 args)))
+                            ((kernel-h kernel-w stride-h stride-w) (mapcar #'enode-value (subseq args 0 4))))
+                       (list* input-0 input-1
+                              (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
+            (concat
+             (let ((axis (enode-value (car args)))
+                   (xdims (shape (nth 1 args)))
+                   (ydims (shape (nth 2 args))))
+               (assert (= (length xdims) (length ydims)))
+               (loop for i from 0
+                     for xdim in xdims
+                     for ydim in ydims
+                     collect (if (= i axis) (+ xdim ydim)
+                                 (progn (assert (= xdim ydim)) xdim)))))
+            ((relu ewadd)
+             (lret ((shape (shape (car args))))
+               (dolist (arg (cdr args))
+                 (assert (equal shape (shape arg))))))))
   :merge (lambda (x y)
            (if (and (not x) y)
                (values y t)
@@ -168,4 +180,4 @@
 #+nil (let* ((*egraph* (make-egraph :analyses 'shape))
        (a (resnext-50)))
   (egraph-rebuild)
-  (get-analysis-data a 'shape))
+  (shape a))

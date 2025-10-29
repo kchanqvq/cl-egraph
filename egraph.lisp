@@ -16,6 +16,10 @@
 
 (in-package :egraph)
 
+(declaim (inline enode-representative-p enode-canonical-p enode-eclass-info
+                 make-analysis-data merge-analysis-data modify-analysis-data
+                 get-analysis-data egraph-n-enodes egraph-n-eclasses))
+
 ;;; E-graph data structure
 
 (defstruct (eclass-info (:constructor %make-eclass-info))
@@ -45,8 +49,6 @@ representativeness."
          (logand (1+ *hash-code*) most-positive-fixnum))
    :type fixnum)
   (canonical-flag t :type boolean))
-
-(declaim (inline enode-representative-p enode-canonical-p enode-eclass-info))
 
 ;; Be aware that representative enode might be non-canonical!
 (defun enode-representative-p (enode)
@@ -107,8 +109,11 @@ function symbol."
   (modify (required-argument :modify) :type function))
 
 (defmacro define-analysis (name &key make merge (modify '(constantly nil)))
-  `(setf (gethash ',name *analysis-info-registry*)
-         (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify)))
+  `(progn
+     (setf (gethash ',name *analysis-info-registry*)
+           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify))
+     (declaim (inline name))
+     (defun ,name (enode) (get-analysis-data enode ',name))))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses enode-limit)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
@@ -149,8 +154,6 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
 
 Only contains canonical enodes after `egraph-rebuild'."
   (eclass-info-nodes (enode-eclass-info enode)))
-
-(declaim (inline make-analysis-data merge-analysis-data modify-analysis-data))
 
 (defun make-analysis-data (enode)
   (let ((term (enode-term enode)))
@@ -416,8 +419,6 @@ TOP-NODE-VAR bound to the enode matching PAT."
     (cons (make-enode (cons (car term) (mapcar #'make-term (cdr term)))))
     (enode term)
     (t (make-enode (list term)))))
-
-(declaim (inline egraph-n-enodes egraph-n-eclasses))
 
 (defun egraph-n-enodes (egraph)
   (hash-table-count (egraph-hash-cons egraph)))
