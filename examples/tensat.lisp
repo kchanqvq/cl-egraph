@@ -148,6 +148,20 @@
                  (when (and x y) (assert (equal x y)))
                  (values x nil)))))
 
+(define-analysis cost
+  :make (lambda (fsym &rest args)
+          (case fsym
+            ((ewadd ewmul) (let* ((shape (get-analysis-data (car args) 'shape)))
+              (reduce #'* shape)))
+            ((matmul)
+              (let* ((lhs (get-analysis-data (car args) 'shape))
+                    (rhs (get-analysis-data (car (last args)) 'shape)))
+                    (* (reduce #'* (append lhs (last rhs))))))
+            ;; TODO
+            ; ((conv2d) ...)
+            (otherwise 0)))
+  :merge (lambda (x y) (min x y)))
+
 (defun resnext-block (input stride-h stride-w out-channels input-dim groups)
   (let* ((w1 (make-term (list 'weight out-channels input-dim 1 1)))
          (tmp (make-term (list 'conv2d 1 1 'psame 'actrelu input w1)))
@@ -178,7 +192,16 @@
       (cfg-blocks 3 2 2 1024))
     tmp))
 
-#+nil (let* ((*egraph* (make-egraph :analyses 'shape))
+#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
        (a (resnext-50)))
   (egraph-rebuild)
   (shape a))
+
+(let* ((*egraph* (make-egraph :analyses '(shape cost)))
+      (input (list 'input 2 3))
+      (weight (list 'weight 3 5))
+      (add (make-term (list 'ewmul input input)))
+      (matmul (make-term (list 'matmul input weight))))
+  (egraph-rebuild)
+  (assert (= 6 (cost add)))
+  (assert (= 30 (cost matmul))))
