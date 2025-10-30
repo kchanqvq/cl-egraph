@@ -2,7 +2,7 @@
     (:use #:cl #:egraph)
   (:import-from #:alexandria #:compose #:map-iota)
   (:import-from #:bind #:bind)
-  (:import-from #:serapeum #:lret))
+  (:import-from #:serapeum #:lret #:lastcar))
 
 (in-package :egraph/examples/tensat)
 
@@ -148,6 +148,19 @@
                  (when (and x y) (assert (equal x y)))
                  (values x nil)))))
 
+(define-analysis cost
+  :make (lambda (enode)
+          (trivia:match (enode-term enode)
+            ((list* 'ewadd children) (reduce #'* (shape enode)))
+            ;; FIXME: Somehow this does not affect resnext-50...
+            ((list* 'conv2d children) (let* ((output (shape enode))
+                                             (kernel (shape (lastcar children))))
+                                        (reduce #'* (append output (nthcdr 2 kernel)))))
+            ((list* args) (reduce #'+ (cdr args) :key (lambda (e) (cost e)) :initial-value 0))
+            ))
+  :merge  (lambda (x y) (if (< y x) (values y t) (values x nil)))
+  :depends-on 'shape)
+
 (defun resnext-block (input stride-h stride-w out-channels input-dim groups)
   (let* ((w1 (make-term (list 'weight out-channels input-dim 1 1)))
          (tmp (make-term (list 'conv2d 1 1 'psame 'actrelu input w1)))
@@ -178,7 +191,15 @@
       (cfg-blocks 3 2 2 1024))
     tmp))
 
-#+nil (let* ((*egraph* (make-egraph :analyses 'shape))
+#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
        (a (resnext-50)))
   (egraph-rebuild)
-  (shape a))
+  (cost a))
+
+#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
+      (input (make-term (list 'input 1 3 224 224)))
+      (weight (make-term (list 'weight 64 3 7 7)))
+      (add (make-term (list 'ewadd input input)))
+      (conv (make-term (list 'conv2d 1 1 'psame 'actrelu input weight))))
+  (egraph-rebuild)
+  (cost conv))
