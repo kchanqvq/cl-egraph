@@ -2,7 +2,7 @@
     (:use #:cl #:egraph)
   (:import-from #:alexandria #:compose #:map-iota)
   (:import-from #:bind #:bind)
-  (:import-from #:serapeum #:lret))
+  (:import-from #:serapeum #:lret #:lastcar))
 
 (in-package :egraph/examples/tensat)
 
@@ -152,8 +152,9 @@
   :make (lambda (enode)
           (trivia:match (enode-term enode)
             ((list* 'ewadd children) (reduce #'* (shape enode)))
+            ;; FIXME: Somehow this does not affect resnext-50...
             ((list* 'conv2d children) (let* ((output (shape enode))
-                                            (kernel (shape (car (last children)))))
+                                             (kernel (shape (lastcar children))))
                                         (reduce #'* (append output (nthcdr 2 kernel)))))
             ((list* args) (reduce #'+ (cdr args) :key (lambda (e) (cost e)) :initial-value 0))
             ))
