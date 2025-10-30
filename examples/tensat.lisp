@@ -137,7 +137,7 @@
                      for ydim in ydims
                      collect (if (= i axis) (+ xdim ydim)
                                  (progn (assert (= xdim ydim)) xdim)))))
-            ((list* (or 'relu 'ewadd) args)
+            ((list* (or 'relu 'ewadd 'ewmul) args)
              (lret ((shape (shape (car args))))
                (dolist (arg (cdr args))
                  (assert (equal shape (shape arg))))))))
