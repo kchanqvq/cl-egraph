@@ -29,7 +29,8 @@
                              (nk (shape (cadr args))))
                          (* (car mn) (cadr mn) (cadr nk)))))
             (mat 0)))
-  :merge (lambda (x y) (if (< y x) (values y t) (values x nil))))
+  :merge (lambda (x y) (if (< y x) (values y t) (values x nil)))
+  :depends-on 'shape)
 
 (defun make-matmul-term (dims)
   (labels ((process (dims)
@@ -41,7 +42,7 @@
     (process dims)))
 
 (def-test matmul.1 ()
-  (let* ((*egraph* (make-egraph :analyses '(shape cost)))
+  (let* ((*egraph* (make-egraph :analyses 'cost))
          (a (make-term
              (make-matmul-term '(10 14 12 9 13 16 1 6 13 14 7 7 3 14 15 15 19 12 19 8)))))
     (egraph-rebuild)

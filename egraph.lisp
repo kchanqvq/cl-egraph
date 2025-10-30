@@ -106,14 +106,33 @@ function symbol."
   (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type function)
   (merge (required-argument :merge) :type function)
-  (modify (required-argument :modify) :type function))
+  (modify (required-argument :modify) :type function)
+  (depends-on nil :type list))
 
-(defmacro define-analysis (name &key make merge (modify '(constantly nil)))
+(defmacro define-analysis (name &key make merge (modify '(constantly nil)) depends-on)
   `(progn
      (setf (gethash ',name *analysis-info-registry*)
-           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify))
+           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify
+                               :depends-on (ensure-list ,depends-on)))
      (declaim (inline name))
      (defun ,name (enode) (get-analysis-data enode ',name))))
+
+(defun compute-analysis-info-list (analyses)
+  (let ((visited (make-hash-table))
+        (result nil))
+    (labels ((visit (analyses)
+               (dolist (name analyses)
+                 (let ((info (or (gethash name *analysis-info-registry*)
+                                 (error "No analysis named ~a." name))))
+                   (case (gethash info visited)
+                     ((nil)
+                      (setf (gethash info visited) 'visiting)
+                      (visit (analysis-info-depends-on info))
+                      (push info result)
+                      (setf (gethash info visited) t))
+                     (visiting (error "Cyclic dependency from ~a." name)))))))
+      (visit (ensure-list analyses))
+      result)))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses enode-limit)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
@@ -125,11 +144,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (classes (make-hash-table :test 'eq) :type hash-table)
   (fsym-table (make-hash-table) :type hash-table)
   (work-list nil :type list)
-  (analysis-info-list
-   (mapcar (lambda (name) (or (gethash name *analysis-info-registry*)
-                              (error "No analysis named ~a." name)))
-           (ensure-list analyses))
-   :type list)
+  (analysis-info-list (compute-analysis-info-list analyses) :type list)
   (analysis-work-list nil :type list)
   (enode-limit array-total-size-limit :type positive-fixnum))
 
