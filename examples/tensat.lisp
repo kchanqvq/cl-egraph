@@ -112,31 +112,32 @@
                   (1+ (floor (- input-w kernel-w) stride-w))))))
 
 (define-analysis shape
-  :make (lambda (fsym &rest args)
-          (case fsym
-            ((input weight) (mapcar #'enode-value args))
-            (conv2d
-             (bind (((stride-h stride-w pmode) (mapcar #'enode-value (subseq args 0 3)))
-                    ((input-0 _ input-h input-w) (shape (nth 4 args)))
-                    ((kernel-0 _ kernel-h kernel-w) (shape (nth 5 args))))
+  :make (lambda (enode)
+          (trivia:match (enode-term enode)
+            ((list* (or 'input 'weight) args) (mapcar #'enode-value args))
+            ((list 'conv2d stride-h stride-w pmode _ input kernel)
+             (bind (((input-0 _ input-h input-w) (shape input))
+                    ((kernel-0 _ kernel-h kernel-w) (shape kernel)))
                (list* input-0 kernel-0
-                      (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
-            (poolmax (bind ((pmode (car (enode-term (nth 4 args))))
-                            ((input-0 input-1 input-h input-w) (shape (nth 5 args)))
-                            ((kernel-h kernel-w stride-h stride-w) (mapcar #'enode-value (subseq args 0 4))))
-                       (list* input-0 input-1
-                              (compute-pad-dims pmode input-h input-w stride-h stride-w kernel-h kernel-w))))
-            (concat
-             (let ((axis (enode-value (car args)))
-                   (xdims (shape (nth 1 args)))
-                   (ydims (shape (nth 2 args))))
+                      (compute-pad-dims (enode-value pmode) input-h input-w
+                                        (enode-value stride-h) (enode-value stride-w)
+                                        kernel-h kernel-w))))
+            ((list 'poolmax kernel-h kernel-w stride-h stride-w pmode input)
+             (bind (((input-0 input-1 input-h input-w) (shape input)))
+               (list* input-0 input-1
+                      (compute-pad-dims (enode-value pmode) input-h input-w
+                                        (enode-value stride-h) (enode-value stride-w)
+                                        (enode-value kernel-h) (enode-value kernel-w)))))
+            ((list 'concat axis x y)
+             (let ((axis (enode-value axis))
+                   (xdims (shape x)) (ydims (shape y)))
                (assert (= (length xdims) (length ydims)))
                (loop for i from 0
                      for xdim in xdims
                      for ydim in ydims
                      collect (if (= i axis) (+ xdim ydim)
                                  (progn (assert (= xdim ydim)) xdim)))))
-            ((relu ewadd)
+            ((list* (or 'relu 'ewadd) args)
              (lret ((shape (shape (car args))))
                (dolist (arg (cdr args))
                  (assert (equal shape (shape arg))))))))

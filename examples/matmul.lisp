@@ -10,25 +10,23 @@
 (defrw -assoc-matmul (matmul (matmul ?x ?y) ?z) (matmul ?x (matmul ?y ?z)))
 
 (define-analysis shape
-  :make (lambda (fsym &rest args)
-          (case fsym
-            (matmul (list (car (shape (car args)))
-                          (cadr (shape (cadr args)))))
-            (mat (mapcar (compose #'car #'enode-term) args))))
+  :make (lambda (enode)
+          (trivia:match (enode-term enode)
+            ((list 'matmul x y) (list (car (shape x)) (cadr (shape y))))
+            ((list* 'mat args) (mapcar (compose #'car #'enode-term) args))))
   :merge (lambda (x y)
            (if (and (not x) y)
                (values y t)
                (values x nil))))
 
 (define-analysis cost
-  :make (lambda (fsym &rest args)
-          (case fsym
-            (matmul (+ (cost (car args))
-                       (cost (cadr args))
-                       (let ((mn (shape (car args)))
-                             (nk (shape (cadr args))))
-                         (* (car mn) (cadr mn) (cadr nk)))))
-            (mat 0)))
+  :make (lambda (enode)
+          (trivia:match (enode-term enode)
+            ((list 'matmul x y)
+             (+ (cost x) (cost y)
+                (let ((mn (shape x)) (nk (shape y)))
+                  (* (car mn) (cadr mn) (cadr nk)))))
+            ((list* 'mat _) 0)))
   :merge (lambda (x y) (if (< y x) (values y t) (values x nil)))
   :depends-on 'shape)
 

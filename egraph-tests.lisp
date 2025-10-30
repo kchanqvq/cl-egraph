@@ -173,22 +173,23 @@
 ;;; E-analysis
 
 (define-analysis const
-  :make (lambda (fsym &rest args)
-          (if args
-              (block nil
-                (let ((args (mapcar (lambda (enode)
-                                      (or (const enode) (return)))
-                                    args)))
-                  ;; Guard against things like division by zero
-                  (ignore-errors
-                   (let* ((result (apply fsym args)))
-                     ;; Coerce integral float into integer
-                     (if (floatp result)
-                         (multiple-value-bind (int frac) (truncate result (float 1.0 result))
-                           (if (zerop frac) int result))
-                         result)))))
-              (when (numberp fsym)
-                fsym)))
+  :make (lambda (enode)
+          (bind:bind (((fsym . args) (enode-term enode)))
+            (if args
+                (block nil
+                  (let ((args (mapcar (lambda (enode)
+                                        (or (const enode) (return)))
+                                      args)))
+                    ;; Guard against things like division by zero
+                    (ignore-errors
+                     (let* ((result (apply fsym args)))
+                       ;; Coerce integral float into integer
+                       (if (floatp result)
+                           (multiple-value-bind (int frac) (truncate result (float 1.0 result))
+                             (if (zerop frac) int result))
+                           result)))))
+                (when (numberp fsym)
+                  fsym))))
   :merge (lambda (x y)
            (if (and (not x) y)
                (values y t)
@@ -214,9 +215,9 @@
     (is (equal 17 (greedy-extract c #'ast-size)))))
 
 (define-analysis var
-  :make (lambda (fsym &rest args)
-          (when (and (not args) (symbolp fsym))
-            fsym))
+  :make (lambda (enode)
+          (trivia:match (enode-term enode)
+            ((list (and v (type symbol))) v)))
   :merge (lambda (x y)
            (if (and (not x) y)
                (values y t)

@@ -6,6 +6,7 @@
   :depends-on (:alexandria
                :serapeum
                :metabang-bind
+               :trivia
                :cl-custom-hash-table
                :global-vars
                :trivial-garbage
