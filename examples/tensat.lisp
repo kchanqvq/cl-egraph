@@ -151,13 +151,13 @@
 (define-analysis cost
   :make (lambda (enode)
           (trivia:match (enode-term enode)
-            ((list* 'ewadd children) (reduce #'* (shape enode)))
+            ((list* 'ewadd _) (reduce #'* (shape enode)))
             ;; FIXME: Somehow this does not affect resnext-50...
-            ((list* 'conv2d children) (let* ((output (shape enode))
-                                             (kernel (shape (lastcar children))))
-                                        (reduce #'* (append output (nthcdr 2 kernel)))))
-            ((list* args) (reduce #'+ (cdr args) :key (lambda (e) (cost e)) :initial-value 0))
-            ))
+            ((list* 'conv2d children)
+             (let* ((output (shape enode))
+                    (kernel (shape (lastcar children))))
+               (reduce #'* (append output (nthcdr 2 kernel)))))
+            ((list* args) (reduce #'+ (cdr args) :key #'cost))))
   :merge  (lambda (x y) (if (< y x) (values y t) (values x nil)))
   :depends-on 'shape)
 
@@ -191,12 +191,12 @@
       (cfg-blocks 3 2 2 1024))
     tmp))
 
-#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
+#+nil (let* ((*egraph* (make-egraph :analyses 'cost))
        (a (resnext-50)))
   (egraph-rebuild)
   (cost a))
 
-#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
+#+nil (let* ((*egraph* (make-egraph :analyses 'cost))
       (input (make-term (list 'input 1 3 224 224)))
       (weight (make-term (list 'weight 64 3 7 7)))
       (add (make-term (list 'ewadd input input)))
