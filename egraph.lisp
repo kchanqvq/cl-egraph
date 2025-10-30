@@ -104,7 +104,7 @@ function symbol."
 (defstruct analysis-info
   "Data for e-analysis."
   (name (required-argument :name) :type symbol)
-  (make (required-argument :make) :type function)
+  (make (required-argument :make) :type (function (enode) t))
   (merge (required-argument :merge) :type function)
   (modify (required-argument :modify) :type function)
   (depends-on nil :type list))
@@ -132,7 +132,7 @@ function symbol."
                       (setf (gethash info visited) t))
                      (visiting (error "Cyclic dependency from ~a." name)))))))
       (visit (ensure-list analyses))
-      result)))
+      (nreverse result))))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses enode-limit)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
