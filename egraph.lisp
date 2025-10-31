@@ -8,7 +8,8 @@
            #:egraph-n-enodes #:egraph-n-eclasses
            #:do-matches #:defrw #:make-term #:run-rewrites
            #:define-analysis #:get-analysis-data
-           #:greedy-extract #:lp-extract))
+           #:build-term #:graph-cost #:tree-cost
+           #:greedy-select #:greedy-extract #:lp-select #:lp-extract))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname
@@ -18,7 +19,7 @@
 
 (declaim (inline enode-representative-p enode-canonical-p enode-eclass-info
                  make-analysis-data merge-analysis-data modify-analysis-data
-                 get-analysis-data egraph-n-enodes egraph-n-eclasses))
+                 get-analysis-data egraph-n-enodes egraph-n-eclasses dfs))
 
 ;;; E-graph data structure
 
@@ -484,20 +485,34 @@ this function."
                   (if (cdr term)
                       (cons (car term) (mapcar #'process (cdr term)))
                       (car term))))))
-      (if (listp enode)
-          (mapcar (compose #'process #'enode-find) enode)
-          (process (enode-find enode))))))
+      (process (enode-find enode)))))
 
-(defun greedy-extract (enode cost-fn)
-  "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
+(defun graph-cost (enode selections cost-fn)
+  (let ((memo (make-hash-table))
+        (cost 0))
+    (labels ((process (class)
+               (ensure-gethash
+                class memo
+                (let ((enode (gethash class selections)))
+                  (incf cost (funcall cost-fn enode))
+                  (mapc #'process (cdr (enode-term enode)))
+                  t))))
+      (process (enode-find enode))
+      cost)))
 
-COST-FN should accept 2 arguments: the enode and a list of costs for each
-argument eclass. It should return a number. The cost of an extraction is the
-cost of its root node.
+(defun tree-cost (enode selections cost-fn)
+  (let ((memo (make-hash-table)))
+    (labels ((process (class)
+               (ensure-gethash
+                class memo
+                (let ((enode (gethash class selections)))
+                  (reduce #'+ (cdr (enode-term enode))
+                          :key #'process :initial-value (funcall cost-fn enode))))))
+      (process (enode-find enode)))))
 
-ENODE can also be a list of enodes, and a list of terms will be returned."
-  (let ((selections (make-hash-table)) ; map eclass to enode
-        (costs (make-hash-table))) ; map eclass to cost
+(defun greedy-select (cost-fn)
+  (lret ((costs (make-hash-table))       ; map eclass to cost
+         (selections (make-hash-table))) ; map eclass to enode
     (loop
       (let (dirty)
         (maphash-keys (lambda (class)
@@ -516,17 +531,17 @@ ENODE can also be a list of enodes, and a list of terms will be returned."
                           (setf (gethash class selections) selection
                                 (gethash class costs) cost)))
                       (egraph-classes *egraph*))
-        (unless dirty (return))))
-    (build-term enode selections)))
+        (unless dirty (return))))))
 
-(defun lp-extract (enode cost-fn)
-  "Extract a term for ENODE from `*egraph*' using ILP.
+(defun greedy-extract (enode cost-fn)
+  "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
 
-COST-FN should accept 1 argument: the enode. It should return a number. The cost
-of an extraction is the sum of costs of the enodes it contains. Note that
-different from `greedy-extract', the cost model is implicitly additive.
+COST-FN should accept 2 arguments: the enode and a list of costs for each
+argument eclass. It should return a number. The cost of an extraction is the
+cost of its root node."
+  (build-term enode (greedy-select cost-fn)))
 
-ENODE can also be a list of enodes, and a list of terms will be returned."
+(defun lp-select (enode cost-fn)
   (let ((class-vars (make-hash-table))  ; map eclass to lp var or 'visiting
         (enode-vars (make-hash-table))
         (objective-terms nil)
@@ -556,17 +571,24 @@ ENODE can also be a list of enodes, and a list of terms will be returned."
                      (push `(lp:<= ,var ,(visit-class class)) constraints))))))
       (dolist (enode (ensure-list enode))
         (push `(lp:<= 1 ,(visit-class (enode-find enode))) constraints)))
-    (let ((solution
+    (lret ((solution
             (lp:solve-problem
              (lp:parse-linear-problem
               `(lp:min (lp:+ ,@objective-terms))
               `(,@constraints
                 (lp:binary ,@ (hash-table-values class-vars))
                 (lp:binary ,@ (hash-table-values enode-vars))))))
-          (selections (make-hash-table)))
+           (selections (make-hash-table)))
       (maphash
        (lambda (enode var)
          (when (= 1 (lp:solution-variable solution var))
            (setf (gethash (enode-find enode) selections) enode)))
-       enode-vars)
-      (build-term enode selections))))
+       enode-vars))))
+
+(defun lp-extract (enode cost-fn)
+  "Extract a term for ENODE from `*egraph*' using ILP.
+
+COST-FN should accept 1 argument: the enode. It should return a number. The cost
+of an extraction is the sum of costs of the enodes it contains. Note that
+different from `greedy-extract', the cost model is implicitly additive."
+  (build-term enode (greedy-select cost-fn)))

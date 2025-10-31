@@ -89,10 +89,10 @@
     -MATMUL-IS-LINEAR-0 MATMUL-IS-LINEAR-1 -MATMUL-IS-LINEAR-1 MATMUL-AND-TRANSPOSE
     -MATMUL-AND-TRANSPOSE CONV-IS-BILINEAR-0 -CONV-IS-BILINEAR-0 CONV-IS-BILINEAR-1
     -CONV-IS-BILINEAR-1 CONV-IS-BILINEAR-2 -CONV-IS-BILINEAR-2 CONV-IS-BILINEAR-3
-    -CONV-IS-BILINEAR-3 -ENLARGE-CONVOLUTION-KERNEL OPERATOR-COMMUTATIVITY-4
-    -OPERATOR-COMMUTATIVITY-4 CONV-WITH-2-APPLIES-ACTRELU -CONV-WITH-2-APPLIES-ACTRELU
+    -CONV-IS-BILINEAR-3 -ENLARGE-CONVOLUTION-KERNEL #+nil OPERATOR-COMMUTATIVITY-4
+    #+nil -OPERATOR-COMMUTATIVITY-4 CONV-WITH-2-APPLIES-ACTRELU -CONV-WITH-2-APPLIES-ACTRELU
     -POOLING-BY-CONV.-WITH-CPOOL CONST-ICONV-AND-CONST-POOL -CONST-ICONV-AND-CONST-POOL
-    IDENTITY-KERNEL IDENTITY-MATRIX -IDENTITY-MATRIX #+nil EWMUL-IDENTITY #+nil -EWMUL-IDENTITY
+    IDENTITY-KERNEL IDENTITY-MATRIX #+nil -IDENTITY-MATRIX #+nil EWMUL-IDENTITY #+nil -EWMUL-IDENTITY
     SPLIT-DEFINITION-0 SPLIT-DEFINITION-1 GEOMETRY-OF-CONCATENATION -GEOMETRY-OF-CONCATENATION
     OPERATOR-COMMUTATIVITY-5 -OPERATOR-COMMUTATIVITY-5 OPERATOR-COMMUTATIVITY-6
     -OPERATOR-COMMUTATIVITY-6 OPERATOR-COMMUTATIVITY-7 -OPERATOR-COMMUTATIVITY-7
@@ -148,16 +148,20 @@
                  (when (and x y) (assert (equal x y)))
                  (values x nil)))))
 
+(defun flop-cost (enode)
+  (trivia:match (enode-term enode)
+    ((list* (or 'ewadd 'ewmul) _) (reduce #'* (shape enode)))
+    ;; FIXME: Somehow this does not affect resnext-50...
+    ((list* 'conv2d children)
+     (let* ((output (shape enode))
+            (kernel (shape (lastcar children))))
+       (reduce #'* (append output (nthcdr 2 kernel)))))
+    (_ 0)))
+
 (define-analysis cost
   :make (lambda (enode)
-          (trivia:match (enode-term enode)
-            ((list* 'ewadd _) (reduce #'* (shape enode)))
-            ;; FIXME: Somehow this does not affect resnext-50...
-            ((list* 'conv2d children)
-             (let* ((output (shape enode))
-                    (kernel (shape (lastcar children))))
-               (reduce #'* (append output (nthcdr 2 kernel)))))
-            ((list* args) (reduce #'+ (cdr args) :key #'cost))))
+          (+ (flop-cost enode)
+             (reduce #'+ (cdr (enode-term enode)) :key #'cost)))
   :merge  (lambda (x y) (if (< y x) (values y t) (values x nil)))
   :depends-on 'shape)
 
@@ -203,3 +207,14 @@
       (conv (make-term (list 'conv2d 1 1 'psame 'actrelu input weight))))
   (egraph-rebuild)
   (cost conv))
+
+#+nil (let* ((*egraph* (make-egraph :analyses 'cost))
+             (a (resnext-50)))
+        (egraph-rebuild)
+        (run-rewrites *tensat-rules*)
+        (graph-cost
+         a
+         (greedy-select (lambda (enode costs)
+                          (declare (ignore costs))
+                          (cost enode)))
+         #'flop-cost))
