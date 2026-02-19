@@ -432,7 +432,8 @@ TOP-NODE-VAR bound to the enode matching PAT."
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
 
-(defun run-rewrites (rules &key max-iter check (max-enodes array-total-size-limit))
+(defun run-rewrites (rules &key max-iter check verbose
+                             (max-enodes array-total-size-limit))
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
 Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
@@ -448,14 +449,19 @@ this function."
       (loop
         (when (and max-iter (>= n-iter max-iter))
           (return :max-iter))
+        (when verbose (format t "Iteration ~d: " n-iter))
+        (when verbose (format t "Applying rules... "))
         (unwind-protect
              (dolist (rule (ensure-list rules))
                (funcall rule))
+          (when verbose (format t "Rebuilding... "))
           (egraph-rebuild))
         (when check (check-egraph))
         (incf n-iter)
         (let ((n-enodes-1 (egraph-n-enodes *egraph*))
               (n-eclasses-1 (egraph-n-eclasses *egraph*)))
+          (when verbose
+            (format t "Done. ~a enodes, ~a eclasses~%" n-enodes-1 n-eclasses-1))
           (if (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1))
               (return :saturate)
               (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1)))))))
