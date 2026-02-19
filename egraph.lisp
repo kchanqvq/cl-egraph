@@ -1,27 +1,8 @@
-(uiop:define-package :egraph
-    (:use #:cl #:alexandria)
-  (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p)
-  (:import-from #:bind #:bind)
-  (:export #:make-enode #:enode-term #:make-egraph #:list-enodes
-           #:enode-representative-p #:enode-canonical-p #:enode-eclass-info
-           #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild #:check-egraph
-           #:egraph-n-enodes #:egraph-n-eclasses
-           #:do-matches #:defrw #:make-term #:run-rewrites
-           #:define-analysis #:get-analysis-data
-           #:build-term #:graph-cost #:tree-cost
-           #:greedy-select #:greedy-extract #:lp-select #:lp-extract))
-
-(serapeum:eval-always
-  (trivial-package-local-nicknames:add-package-local-nickname
-   '#:lp '#:linear-programming '#:egraph))
-
 (in-package :egraph)
 
 (declaim (inline enode-representative-p enode-canonical-p enode-eclass-info
                  make-analysis-data merge-analysis-data modify-analysis-data
                  get-analysis-data egraph-n-enodes egraph-n-eclasses dfs))
-
-;;; E-graph data structure
 
 (defstruct (eclass-info (:constructor %make-eclass-info))
   "Metadata for the eclass.
@@ -150,12 +131,6 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
                    parent grandparent
                    enode parent))))))
 
-(defun list-enodes (enode)
-  "List of enodes equivalent to ENODE.
-
-Only contains canonical enodes after `egraph-rebuild'."
-  (eclass-info-nodes (enode-eclass-info enode)))
-
 (defun make-analysis-data (out enode)
   (map-into out (lambda (analysis-info)
                   (funcall (analysis-info-make analysis-info) enode))
@@ -190,6 +165,7 @@ Only contains canonical enodes after `egraph-rebuild'."
          (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
              (error "Analysis ~a missing from egraph." name))))
 
+(-> make-enode (list) enode)
 (defun make-enode (term)
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
     (or (gethash term (egraph-hash-cons *egraph*))
@@ -280,6 +256,8 @@ Only contains canonical enodes after `egraph-rebuild'."
                         (push node (fsym-info-nodes fsym-info))))))
                 (egraph-classes *egraph*)))
 
+;;; Utils
+
 (defun hash-table-keys-difference (table-1 table-2)
   (let ((results nil))
     (maphash-keys (lambda (class)
@@ -326,99 +304,11 @@ Only contains canonical enodes after `egraph-rebuild'."
         (format t "~a/~a (~,2$%) elements in parent list are duplicates.~%"
                 n-dup n-parent-list (* 100 (/ n-dup n-parent-list)))))))
 
-;;; E-match/rewrite compiler
+(defun list-enodes (enode)
+  "List of enodes equivalent to ENODE.
 
-(defun var-p (object)
-  (typecase object
-    (symbol (string-prefix-p "?" (symbol-name object)))))
-
-(defvar *fsym-info-var-alist*)
-
-(defun gensym-1 (thing)
-  (make-gensym (prin1-to-string thing)))
-
-(defun parse-pattern (pat eclass-var)
-  "Convert PAT into a list of the form ((eclass-var fsym arg-var...) ...)."
-  (cond ((consp pat)
-         (let* ((fsym (car pat))
-                (arg-vars (mapcar (lambda (arg) (if (var-p arg) arg (gensym-1 fsym))) (cdr pat))))
-           (cons (list* eclass-var fsym arg-vars)
-                 (mapcan (lambda (arg var)
-                           (unless (var-p arg)
-                             (parse-pattern arg var)))
-                         (cdr pat) arg-vars))))
-        ((var-p pat) (error "Single variable pattern should not be handled here."))
-        (t ;; Non-variable atoms are short hand for 0-arity function symbol
-         (parse-pattern (list pat) eclass-var))))
-
-(defun expand-match (bound-vars subst-alist cont-expr)
-  "Generate code that solves for SUBST-ALIST (as returned by `parse-pattern') then
-evaluate CONT-EXPR."
-  (if subst-alist
-      (bind ((((var fsym . arg-vars) . rest) subst-alist)
-             ((:flet lisp-var (var))
-              (if (member var bound-vars)
-                  (gensym-1 fsym)
-                  (progn (push var bound-vars) var)))
-             (lisp-arg-vars (mapcar #'lisp-var arg-vars))
-             (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                              (gensym-1 fsym)))
-             (lhs-bound-p (member var bound-vars))
-             (node-var (lisp-var var)))
-        ;; Currently we use indexes (in `fsym-info') as single source of truth
-        ;; for matching, thus no-need to `enode-find' representative of VAR
-        ;; (even if VAR is non-rep, it once was when we built the index in
-        ;; `egraph-rebuild'
-        `(dolist (,node-var ,(if lhs-bound-p
-                                 `(gethash ,var (fsym-info-node-table ,fsym-info-var))
-                                 `(fsym-info-nodes ,fsym-info-var)))
-           (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
-             (declare (ignorable ,@lisp-arg-vars))
-             (when (and ,@ (mapcan (lambda (lisp-var var)
-                                     (when (and (var-p var) (not (var-p lisp-var)))
-                                       `((eq ,lisp-var ,var))))
-                                   lisp-arg-vars arg-vars))
-               ,(expand-match bound-vars rest cont-expr)))))
-      cont-expr))
-
-(defun expand-template (tmpl)
-  "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
-  (labels ((process (tmpl)
-             (cond ((consp tmpl)
-                    `(let ((list (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
-                       (declare (dynamic-extent list))
-                       (make-enode list)))
-                   ((var-p tmpl) tmpl)
-                   (t (process (list tmpl))))))
-    (process tmpl)))
-
-(defmacro do-matches ((top-node-var pat) &body body)
-  "Evaluate BODY for every PAT match in EGRAPH.
-
-BODY is evaluated with variables in PAT bound to matched eclasses and
-TOP-NODE-VAR bound to the enode matching PAT."
-  (if (var-p pat) ; Special case for single variable PAT that scans all enodes
-      `(maphash-keys
-        (lambda (,pat) (let ((,top-node-var ,pat)) ,@body))
-        (egraph-classes *egraph*))
-      (let* ((*fsym-info-var-alist* nil)
-             (match-body
-               (expand-match nil (parse-pattern pat top-node-var)
-                             `(locally ,@body))))
-        `(let ,(mapcar (lambda (kv) `(,(cdr kv)
-                                      (ensure-gethash ',(car kv) (egraph-fsym-table *egraph*)
-                                                      (make-fsym-info))))
-                       *fsym-info-var-alist*)
-           ,match-body))))
-
-(defmacro defrw (name lhs rhs &key (guard t))
-  "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
-  `(defun ,name ()
-     (do-matches (top-node ,lhs)
-       (when ,guard
-         (enode-merge top-node ,(expand-template rhs))))))
-
-;;; Utils
+Only contains canonical enodes after `egraph-rebuild'."
+  (eclass-info-nodes (enode-eclass-info enode)))
 
 (defun make-term (term)
   (typecase term
@@ -431,156 +321,3 @@ TOP-NODE-VAR bound to the enode matching PAT."
 
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
-
-(defun run-rewrites (rules &key max-iter check verbose
-                             (max-enodes array-total-size-limit))
-  "Run RULES repeatly on `*egraph*' until some stop criterion.
-
-Returns the reason for termination: one of :max-iter, :max-enodes, :saturate.
-
-Note: this function does not call `egraph-rebuild' upfront. Particularly, if you
-have added some terms to EGRAPH, you MUST call `egraph-rebuild' before calling
-this function."
-  (let ((n-enodes (egraph-n-enodes *egraph*))
-        (n-eclasses (egraph-n-eclasses *egraph*))
-        (n-iter 0))
-    (setf (egraph-enode-limit *egraph*) max-enodes)
-    (catch 'stop
-      (loop
-        (when (and max-iter (>= n-iter max-iter))
-          (return :max-iter))
-        (when verbose (format t "Iteration ~d: " n-iter))
-        (when verbose (format t "Applying rules... "))
-        (unwind-protect
-             (dolist (rule (ensure-list rules))
-               (funcall rule))
-          (when verbose (format t "Rebuilding... "))
-          (egraph-rebuild))
-        (when check (check-egraph))
-        (incf n-iter)
-        (let ((n-enodes-1 (egraph-n-enodes *egraph*))
-              (n-eclasses-1 (egraph-n-eclasses *egraph*)))
-          (when verbose
-            (format t "Done. ~a enodes, ~a eclasses~%" n-enodes-1 n-eclasses-1))
-          (if (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1))
-              (return :saturate)
-              (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1)))))))
-
-;;; Extract
-
-(defun build-term (enode selections)
-  (let ((memo (make-hash-table)))       ; used to preserve sharing
-    (labels ((process (class)
-               (ensure-gethash
-                class memo
-                (let ((term (enode-term (gethash class selections))))
-                  (if (cdr term)
-                      (cons (car term) (mapcar #'process (cdr term)))
-                      (car term))))))
-      (process (enode-find enode)))))
-
-(defun graph-cost (enode selections cost-fn)
-  (let ((memo (make-hash-table))
-        (cost 0))
-    (labels ((process (class)
-               (ensure-gethash
-                class memo
-                (let ((enode (gethash class selections)))
-                  (incf cost (funcall cost-fn enode))
-                  (mapc #'process (cdr (enode-term enode)))
-                  t))))
-      (process (enode-find enode))
-      cost)))
-
-(defun tree-cost (enode selections cost-fn)
-  (let ((memo (make-hash-table)))
-    (labels ((process (class)
-               (ensure-gethash
-                class memo
-                (let ((enode (gethash class selections)))
-                  (reduce #'+ (cdr (enode-term enode))
-                          :key #'process :initial-value (funcall cost-fn enode))))))
-      (process (enode-find enode)))))
-
-(defun greedy-select (cost-fn)
-  (lret ((costs (make-hash-table))       ; map eclass to cost
-         (selections (make-hash-table))) ; map eclass to enode
-    (loop
-      (let (dirty)
-        (maphash-keys (lambda (class)
-                        (let ((selection (gethash class selections))
-                              (cost (gethash class costs)))
-                          (dolist (enode (list-enodes class))
-                            (let* ((term (enode-term enode))
-                                   (new-cost
-                                     (funcall cost-fn enode
-                                              (mapcar (rcurry #'gethash costs) (cdr term)))))
-                              (when (if cost (and new-cost (< new-cost cost))
-                                        new-cost)
-                                (setf selection enode
-                                      cost new-cost
-                                      dirty t))))
-                          (setf (gethash class selections) selection
-                                (gethash class costs) cost)))
-                      (egraph-classes *egraph*))
-        (unless dirty (return))))))
-
-(defun greedy-extract (enode cost-fn)
-  "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
-
-COST-FN should accept 2 arguments: the enode and a list of costs for each
-argument eclass. It should return a number. The cost of an extraction is the
-cost of its root node."
-  (build-term enode (greedy-select cost-fn)))
-
-(defun lp-select (enode cost-fn)
-  (let ((class-vars (make-hash-table))  ; map eclass to lp var or 'visiting
-        (enode-vars (make-hash-table))
-        (objective-terms nil)
-        (constraints nil))
-    (labels ((visit-class (class)
-               (ensure-gethash
-                class class-vars
-                (progn
-                  ;; Mark the eclass as 'visiting to detect back edge from
-                  ;; enode, so that we can ensure acyclicity
-                  (setf (gethash class class-vars) 'visiting)
-                  (lret ((var (gensym-1 'class)))
-                    (push `(lp:<=
-                            ,var
-                            (lp:+ ,@ (remove-if #'not (mapcar #'visit-enode (list-enodes class)))))
-                          constraints)))))
-             (visit-enode (enode)
-               ;; Return a lp var or NIL. NIL is returned if there's back edge
-               ;; to a visiting eclass, therefore this enode is not processed
-               (unless (some (lambda (class) (eq (gethash class class-vars) 'visiting))
-                             (cdr (enode-term enode)))
-                 (lret ((cost (funcall cost-fn enode))
-                        (var (gensym-1 (car (enode-term enode)))))
-                   (setf (gethash enode enode-vars) var)
-                   (push `(lp:* ,cost ,var) objective-terms)
-                   (dolist (class (cdr (enode-term enode)))
-                     (push `(lp:<= ,var ,(visit-class class)) constraints))))))
-      (dolist (enode (ensure-list enode))
-        (push `(lp:<= 1 ,(visit-class (enode-find enode))) constraints)))
-    (lret ((solution
-            (lp:solve-problem
-             (lp:parse-linear-problem
-              `(lp:min (lp:+ ,@objective-terms))
-              `(,@constraints
-                (lp:binary ,@ (hash-table-values class-vars))
-                (lp:binary ,@ (hash-table-values enode-vars))))))
-           (selections (make-hash-table)))
-      (maphash
-       (lambda (enode var)
-         (when (= 1 (lp:solution-variable solution var))
-           (setf (gethash (enode-find enode) selections) enode)))
-       enode-vars))))
-
-(defun lp-extract (enode cost-fn)
-  "Extract a term for ENODE from `*egraph*' using ILP.
-
-COST-FN should accept 1 argument: the enode. It should return a number. The cost
-of an extraction is the sum of costs of the enodes it contains. Note that
-different from `greedy-extract', the cost model is implicitly additive."
-  (build-term enode (lp-select enode cost-fn)))

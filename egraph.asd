@@ -12,7 +12,11 @@
                :trivial-garbage
                :trivial-package-local-nicknames
                :linear-programming)
-  :components ((:file "egraph"))
+  :components ((:file "package")
+               (:file "egraph")
+               (:file "match")
+               (:file "run")
+               (:file "extract"))
   :in-order-to ((test-op (test-op "egraph/tests"))))
 
 (asdf:defsystem #:egraph/tests
