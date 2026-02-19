@@ -107,33 +107,14 @@ function symbol."
   (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type (function (enode) t))
   (merge (required-argument :merge) :type function)
-  (modify (required-argument :modify) :type function)
-  (depends-on nil :type list))
+  (modify (required-argument :modify) :type function))
 
-(defmacro define-analysis (name &key make merge (modify '(constantly nil)) depends-on)
+(defmacro define-analysis (name &key make merge (modify '(constantly nil)))
   `(progn
      (setf (gethash ',name *analysis-info-registry*)
-           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify
-                               :depends-on (ensure-list ,depends-on)))
+           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify))
      (declaim (inline name))
      (defun ,name (enode) (get-analysis-data enode ',name))))
-
-(defun compute-analysis-info-list (analyses)
-  (let ((visited (make-hash-table))
-        (result nil))
-    (labels ((visit (analyses)
-               (dolist (name analyses)
-                 (let ((info (or (gethash name *analysis-info-registry*)
-                                 (error "No analysis named ~a." name))))
-                   (case (gethash info visited)
-                     ((nil)
-                      (setf (gethash info visited) 'visiting)
-                      (visit (analysis-info-depends-on info))
-                      (push info result)
-                      (setf (gethash info visited) t))
-                     (visiting (error "Cyclic dependency from ~a." name)))))))
-      (visit (ensure-list analyses))
-      (nreverse result))))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses enode-limit)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
@@ -145,7 +126,11 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (classes (make-hash-table :test 'eq) :type hash-table)
   (fsym-table (make-hash-table) :type hash-table)
   (work-list nil :type list)
-  (analysis-info-list (compute-analysis-info-list analyses) :type list)
+  (analysis-info-list
+   (mapcar (lambda (name) (or (gethash name *analysis-info-registry*)
+                              (error "No analysis named ~a." name)))
+           (ensure-list analyses))
+   :type list)
   (analysis-work-list nil :type list)
   (enode-limit array-total-size-limit :type positive-fixnum))
 
@@ -591,4 +576,4 @@ cost of its root node."
 COST-FN should accept 1 argument: the enode. It should return a number. The cost
 of an extraction is the sum of costs of the enodes it contains. Note that
 different from `greedy-extract', the cost model is implicitly additive."
-  (build-term enode (greedy-select cost-fn)))
+  (build-term enode (lp-select enode cost-fn)))
