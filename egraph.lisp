@@ -187,7 +187,8 @@ Only contains canonical enodes after `egraph-rebuild'."
 (-> get-analysis-data (enode symbol) t)
 (defun get-analysis-data (enode name)
   (svref (eclass-info-analysis-data-vec (enode-eclass-info enode))
-         (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)))
+         (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
+             (error "Analysis ~a missing from egraph." name))))
 
 (defun make-enode (term)
   (let ((term (cons (car term) (mapcar #'enode-find (cdr term)))))
