@@ -16,7 +16,8 @@
                (:file "egraph")
                (:file "match")
                (:file "run")
-               (:file "extract"))
+               (:file "extract")
+               (:file "luser"))
   :in-order-to ((test-op (test-op "egraph/tests"))))
 
 (asdf:defsystem #:egraph/tests

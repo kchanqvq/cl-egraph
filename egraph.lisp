@@ -310,22 +310,8 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
 Only contains canonical enodes after `egraph-rebuild'."
   (eclass-info-nodes (enode-eclass-info enode)))
 
-(defun make-term (term)
-  (typecase term
-    (cons (make-enode (cons (car term) (mapcar #'make-term (cdr term)))))
-    (enode term)
-    (t (make-enode (list term)))))
-
 (defun egraph-n-enodes (egraph)
   (hash-table-count (egraph-hash-cons egraph)))
 
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
-
-(declaim (inline orp make-orp))
-
-(defun orp (x y) (or x y))
-
-(defun make-orp (test)
-  (lambda (x y)
-    (if x (if y (if (funcall test x y) x (error "Conflicting values: ~a vs ~a" x y)) x) y)))
