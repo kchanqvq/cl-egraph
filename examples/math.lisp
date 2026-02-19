@@ -25,10 +25,7 @@
                            result)))))
                 (when (numberp fsym)
                   fsym))))
-  :merge (lambda (x y)
-           (if (and (not x) y)
-               (values y t)
-               (values x nil)))
+  :merge (make-orp #'=)
   :modify (lambda (node data)
             (when data
               (let* ((term (list data))
@@ -42,10 +39,7 @@
   :make (lambda (enode)
           (trivia:match (enode-term enode)
             ((list (and v (type symbol))) v)))
-  :merge (lambda (x y)
-           (if (and (not x) y)
-               (values y t)
-               (values x nil))))
+  :merge (make-orp #'eq))
 
 (defrw commute-add (+ ?a ?b) (+ ?b ?a))
 (defrw commute-mul (* ?a ?b) (* ?b ?a))

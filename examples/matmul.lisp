@@ -14,10 +14,7 @@
           (trivia:match (enode-term enode)
             ((list 'matmul x y) (list (car (shape x)) (cadr (shape y))))
             ((list* 'mat args) (mapcar (compose #'car #'enode-term) args))))
-  :merge (lambda (x y)
-           (if (and (not x) y)
-               (values y t)
-               (values x nil))))
+  :merge (make-orp #'equal))
 
 (define-analysis cost
   :make (lambda (enode)
@@ -27,7 +24,7 @@
                 (let ((mn (shape x)) (nk (shape y)))
                   (* (car mn) (cadr mn) (cadr nk)))))
             ((list* 'mat _) 0)))
-  :merge (lambda (x y) (if (< y x) (values y t) (values x nil))))
+  :merge #'min)
 
 (defun make-matmul-term (dims)
   (labels ((process (dims)

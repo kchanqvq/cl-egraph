@@ -137,16 +137,16 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
             (egraph-analysis-info-list *egraph*)))
 
 (defun merge-analysis-data (eclass data-vec)
-  (let ((data-changed nil)
-        (class-info (enode-parent eclass)))
+  (let* ((data-changed nil)
+        (class-info (enode-parent eclass))
+        (old-data-vec (eclass-info-analysis-data-vec class-info)))
     (loop for analysis-info in (egraph-analysis-info-list *egraph*)
-          for i from 0 do
-            (multiple-value-bind (new-data changed)
-                (funcall (analysis-info-merge analysis-info)
-                         (svref (eclass-info-analysis-data-vec class-info) i)
-                         (svref data-vec i))
-              (setf (svref (eclass-info-analysis-data-vec class-info) i) new-data
-                    data-changed (or data-changed changed))))
+          for i from 0
+          for old-data across old-data-vec
+          for new-data = (funcall (analysis-info-merge analysis-info)
+                                  old-data (svref data-vec i))
+          do (setf (svref (eclass-info-analysis-data-vec class-info) i) new-data
+                   data-changed (or data-changed (not (eq old-data new-data)))))
     (when data-changed
       (push eclass (egraph-analysis-work-list *egraph*)))))
 
@@ -321,3 +321,11 @@ Only contains canonical enodes after `egraph-rebuild'."
 
 (defun egraph-n-eclasses (egraph)
   (hash-table-count (egraph-classes egraph)))
+
+(declaim (inline orp make-orp))
+
+(defun orp (x y) (or x y))
+
+(defun make-orp (test)
+  (lambda (x y)
+    (if x (if y (if (funcall test x y) x (error "Conflicting values: ~a vs ~a" x y)) x) y)))
