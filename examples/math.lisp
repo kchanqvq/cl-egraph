@@ -2,6 +2,10 @@
     (:use #:cl #:egraph)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
+(serapeum:eval-always
+  (trivial-package-local-nicknames:add-package-local-nickname
+   "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "EGRAPH/EXAMPLES/MATH"))
+
 (in-package :egraph/examples/math)
 
 (def-suite* math :in :egraph)
@@ -137,7 +141,7 @@
     (is (eq (enode-find b) (enode-find a)))))
 
 (def-test bench.math.diff ()
-  (let ((timer (benchmark:make-timer)))
+  (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph :analyses '(var const))))
         (format t "~&Benchmark run ~a." i)

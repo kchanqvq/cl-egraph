@@ -2,6 +2,10 @@
     (:use #:cl #:egraph)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
+(serapeum:eval-always
+  (trivial-package-local-nicknames:add-package-local-nickname
+   "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "EGRAPH/TESTS"))
+
 (in-package :egraph/tests)
 
 (def-suite* :egraph)
@@ -255,7 +259,7 @@
 (defrw i-part (i ?x (* ?a ?b)) (- (* ?a (i ?x ?b)) (i ?x (* (d ?x ?a) (i ?x ?b)))))
 
 (def-test bench.math ()
-  (let ((timer (benchmark:make-timer)))
+  (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
@@ -279,7 +283,7 @@
     (benchmark:report timer)))
 
 (def-test bench.analysis-ac ()
-  (let ((timer (benchmark:make-timer)))
+  (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph :analyses 'const)))
         (format t "~&Benchmark run ~a." i)
