@@ -96,7 +96,8 @@ TOP-NODE-VAR bound to the enode matching PAT."
   (with-gensyms (process)
     `(labels ((,process (,subterm-var)
                 ,@body
-                (mapc #',process (cdr ,subterm-var))))
+                (when (consp ,subterm-var)
+                  (mapc #',process (cdr ,subterm-var)))))
        (,process ,term))))
 
 (defvar *term*)
@@ -117,14 +118,18 @@ TOP-NODE-VAR bound to the enode matching PAT."
         `(,@(if lhs-bound-p
                 `(let ((,term-var ,var)))
                 `(do-term (,term-var *term*)))
-          (when (eq (car ,term-var) ',fsym)
-            (destructuring-bind ,lisp-arg-vars (cdr ,term-var)
-              (declare (ignorable ,@lisp-arg-vars))
-              (when (and ,@ (mapcan (lambda (lisp-var var)
-                                      (when (and (var-p var) (not (var-p lisp-var)))
-                                        `((equal ,lisp-var ,var))))
-                                    lisp-arg-vars arg-vars))
-                ,(expand-term-match bound-vars rest cont-expr))))))
+          ,(if arg-vars
+               `(when (and (consp ,term-var)
+                           (eq (car ,term-var) ',fsym))
+                  (destructuring-bind ,lisp-arg-vars (cdr ,term-var)
+                    (declare (ignorable ,@lisp-arg-vars))
+                    (when (and ,@ (mapcan (lambda (lisp-var var)
+                                            (when (and (var-p var) (not (var-p lisp-var)))
+                                              `((equal ,lisp-var ,var))))
+                                          lisp-arg-vars arg-vars))
+                      ,(expand-term-match bound-vars rest cont-expr))))
+               `(when (eq ,term-var ',fsym)
+                  ,cont-expr))))
       cont-expr))
 
 (defun expand-term-template (tmpl)
@@ -133,12 +138,15 @@ TOP-NODE-VAR bound to the enode matching PAT."
                     `(funcall *term-normalizer* ',(car tmpl)
                               ,@ (mapcar #'process (cdr tmpl))))
                    ((var-p tmpl) tmpl)
-                   (t (process (list tmpl))))))
+                   (t `',tmpl))))
     (process tmpl)))
 
 (defmacro do-term-matches ((top-term-var pat) &body body)
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
-      `(do-term (,pat *term*) (let ((,top-term-var ,pat)) ,@body))
+      `(do-term (,pat *term*)
+         (let ((,top-term-var ,pat))
+           (declare (ignorable ,top-term-var))
+           ,@body))
       (expand-term-match nil (parse-pattern pat top-term-var)
                          `(locally ,@body))))
 
