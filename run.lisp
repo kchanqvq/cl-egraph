@@ -5,7 +5,7 @@
                              (initial-ban-length 5))
   "Run RULES repeatly on `*egraph*' until some stop criterion.
 
-Returns the reason for termination: one of :max-iter, :rule-ban, :saturate.
+Returns the reason for termination: one of :max-iter, :saturate.
 
 If INITIAL-MATCH-LIMIT is non-nil, schedule rules in the style of
 egg's BackoffScheduler.
@@ -48,6 +48,6 @@ this function."
             (format t "Done. ~a enodes, ~a eclasses~%" n-enodes-1 n-eclasses-1))
           (cond ((not (and (= n-enodes n-enodes-1) (= n-eclasses n-eclasses-1)))
                  (setq n-enodes n-enodes-1 n-eclasses n-eclasses-1))
-                ((plusp (hash-table-count ban-until-table))
-                 (return :rule-ban))
+                ;; Some rules are still banned, skip till they reactivate
+                ((plusp (hash-table-count ban-until-table)))
                 (t (return :saturate))))))))
