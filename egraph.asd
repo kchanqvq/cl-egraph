@@ -29,4 +29,6 @@
                 :components ((:file "simple")
                              (:file "math")
                              (:file "matmul"))))
-  :perform (test-op (o c) (symbol-call :fiveam '#:run! :egraph)))
+  :perform (test-op (o c)
+                    (symbol-call :fiveam '#:run! :egraph)
+                    (symbol-call :fiveam '#:run! :egraph/bench)))

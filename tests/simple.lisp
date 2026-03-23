@@ -1,6 +1,8 @@
 (uiop:define-package :egraph/tests
     (:use #:cl #:egraph)
-  (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
+  (:import-from #:fiveam
+                #:def-suite* #:def-suite
+                #:def-test #:is #:in-suite))
 
 (serapeum:eval-always
  (trivial-package-local-nicknames:add-package-local-nickname
@@ -9,6 +11,7 @@
 (in-package :egraph/tests)
 
 (def-suite* :egraph)
+(def-suite :egraph/bench)
 
 ;;; E-graph data structure and rebuild
 
@@ -258,7 +261,7 @@
 (defrw i-sub (i ?x (- ?f ?g)) (- (i ?x ?f) (i ?x ?g)))
 (defrw i-part (i ?x (* ?a ?b)) (- (* ?a (i ?x ?b)) (i ?x (* (d ?x ?a) (i ?x ?b)))))
 
-(def-test bench.math ()
+(def-test bench.math (:suite :egraph/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph)))
@@ -282,7 +285,7 @@
         (is (= 1047556 (egraph-n-enodes *egraph*)))))
     (benchmark:report timer)))
 
-(def-test bench.analysis-ac ()
+(def-test bench.analysis-ac (:suite :egraph/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph :analyses 'const)))

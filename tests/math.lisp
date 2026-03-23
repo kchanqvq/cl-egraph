@@ -140,7 +140,7 @@
     (run-rewrites *math-rules* :max-enodes 5000)
     (is (eq (enode-find b) (enode-find a)))))
 
-(def-test bench.math.diff ()
+(def-test bench.math.diff (:suite :egraph/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 3 do
       (let ((*egraph* (make-egraph :analyses '(var const))))
