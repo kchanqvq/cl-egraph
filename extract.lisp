@@ -32,11 +32,12 @@
                 (let ((enode (gethash class selections)))
                   (reduce #'+ (cdr (enode-term enode))
                           :key #'process :initial-value (funcall cost-fn enode))))))
-      (process (enode-find enode)))))
+      (process (enode-find enode))
+      memo)))
 
 (defun greedy-select (cost-fn)
-  (lret ((costs (make-hash-table))       ; map eclass to cost
-         (selections (make-hash-table))) ; map eclass to enode
+  (let ((costs (make-hash-table))        ; map eclass to cost
+        (selections (make-hash-table)))  ; map eclass to enode
     (loop
       (let (dirty)
         (maphash-keys (lambda (class)
@@ -55,7 +56,8 @@
                           (setf (gethash class selections) selection
                                 (gethash class costs) cost)))
                       (egraph-classes *egraph*))
-        (unless dirty (return))))))
+        (unless dirty (return))))
+    (values selections costs)))
 
 (defun greedy-extract (enode cost-fn)
   "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
@@ -105,7 +107,7 @@ cost of its root node."
            (selections (make-hash-table)))
       (maphash
        (lambda (enode var)
-         (when (= 1 (lp:solution-variable solution var))
+         (when (plusp (lp:solution-variable solution var))
            (setf (gethash (enode-find enode) selections) enode)))
        enode-vars))))
 

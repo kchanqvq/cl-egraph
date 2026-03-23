@@ -25,8 +25,8 @@
   :depends-on (:egraph
                :fiveam
                :trivial-benchmark)
-  :components ((:file "egraph-tests")
-               (:module "examples"
-                :components ((:file "math")
+  :components ((:module "tests"
+                :components ((:file "simple")
+                             (:file "math")
                              (:file "matmul"))))
   :perform (test-op (o c) (symbol-call :fiveam '#:run! :egraph)))

@@ -1,10 +1,10 @@
-(uiop:define-package :egraph/examples/matmul
+(uiop:define-package :egraph/tests/matmul
     (:use #:cl #:egraph #:alexandria)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
-(in-package :egraph/examples/matmul)
+(in-package :egraph/tests/matmul)
 
-(def-suite* matmul :in :egraph)
+(def-suite* :matmul :in :egraph)
 
 (defrw assoc-matmul (matmul ?x (matmul ?y ?z)) (matmul (matmul ?x ?y) ?z))
 (defrw -assoc-matmul (matmul (matmul ?x ?y) ?z) (matmul ?x (matmul ?y ?z)))

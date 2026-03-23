@@ -1,14 +1,14 @@
-(uiop:define-package :egraph/examples/math
+(uiop:define-package :egraph/tests/math
     (:use #:cl #:egraph)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname
-   "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "EGRAPH/EXAMPLES/MATH"))
+   "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "EGRAPH/TESTS/MATH"))
 
-(in-package :egraph/examples/math)
+(in-package :egraph/tests/math)
 
-(def-suite* math :in :egraph)
+(def-suite* :math :in :egraph)
 
 (define-analysis const
   :make (lambda (enode)
@@ -168,5 +168,7 @@
     (run-rewrites *math-rules* :max-enodes 5000)
     (is (equal '(pow (* 3 x) (+ x x))
                (greedy-extract a #'ast-size-no-d-or-i)))
-    (is (equal '(pow (+ x (+ x x)) (+ x x))
-               (lp-extract a (constantly 1))))))
+    (is (member (lp-extract a (constantly 1))
+                '((pow (+ x (+ x x)) (+ x x))
+                  (pow (+ (+ x x) x) (+ x x)))
+                :test 'equal))))
