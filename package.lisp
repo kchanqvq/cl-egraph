@@ -9,7 +9,9 @@
            #:do-matches #:defrw #:make-term #:run-rewrites
            #:define-analysis #:get-analysis-data
            #:build-term #:graph-cost #:tree-cost
-           #:greedy-select #:greedy-extract #:lp-select #:lp-extract))
+           #:greedy-select #:greedy-extract #:lp-select #:lp-extract
+
+           #:*term-normalizer* #:do-term-matches #:random-search))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname
