@@ -97,7 +97,7 @@ function symbol."
      (declaim (inline name))
      (defun ,name (enode) (get-analysis-data enode ',name))))
 
-(defstruct (egraph (:constructor make-egraph (&key analyses enode-limit)))
+(defstruct (egraph (:constructor make-egraph (&key analyses)))
   "HASH-CONS stores all canonical enodes. CLASSES stores all
 eclass (i.e. representative enodes). FSYM-TABLE stores a `fsym-info' entry for
 every encountered function symbol.
@@ -112,8 +112,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
                               (error "No analysis named ~a." name)))
            (ensure-list analyses))
    :type list)
-  (analysis-work-list nil :type list)
-  (enode-limit array-total-size-limit :type positive-fixnum))
+  (analysis-work-list nil :type list))
 
 (defvar *egraph*)
 (setf (documentation '*egraph* 'variable) "Current egraph under operation.")
@@ -172,9 +171,6 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
         (lret ((data-vec (make-array (length (egraph-analysis-info-list *egraph*))
                                      :initial-element 'unbound))
                (enode (%make-enode :term term)))
-          (unless (< (hash-table-count (egraph-hash-cons *egraph*))
-                     (egraph-enode-limit *egraph*))
-            (throw 'stop :max-enodes))
           (setf (enode-parent enode)
                 (%make-eclass-info :nodes (list enode) :analysis-data-vec data-vec))
           (dolist (arg (cdr term))

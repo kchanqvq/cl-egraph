@@ -118,7 +118,7 @@
      (let* ((*egraph* (make-egraph :analyses '(var const)))
             (lhs (make-term ',lhs)))
        (egraph-rebuild)
-       (run-rewrites *math-rules* :max-enodes 5000)
+       (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
        (is (eq (enode-find (make-term ',rhs)) (enode-find lhs))))))
 
 (def-math-test math.simplify-root ()
@@ -137,7 +137,7 @@
          (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
          (b (make-term '(* x (- (* 3 x) 14)))))
     (egraph-rebuild)
-    (run-rewrites *math-rules* :max-enodes 5000)
+    (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
     (is (eq (enode-find b) (enode-find a)))))
 
 (def-test bench.math.diff (:suite :egraph/bench)
@@ -149,7 +149,7 @@
         (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
-          (run-rewrites *math-rules* :max-enodes 50000))))
+          (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000))))
     (benchmark:report timer)))
 
 (def-math-test math.integral-part.1 ()
@@ -165,7 +165,7 @@
   (let* ((*egraph* (make-egraph :analyses '(var const)))
          (a (make-term '(pow (+ x (+ x x)) (+ x x)))))
     (egraph-rebuild)
-    (run-rewrites *math-rules* :max-enodes 5000)
+    (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
     (is (equal '(pow (* 3 x) (+ x x))
                (greedy-extract a #'ast-size-no-d-or-i)))
     (is (member (lp-extract a (constantly 1))
