@@ -51,3 +51,38 @@ this function."
                 ;; Some rules are still banned, skip till they reactivate
                 ((plusp (hash-table-count ban-until-table)))
                 (t (return :saturate))))))))
+
+(defun random-search (term rules cost-fn &key (beta 5.0) (seed 0) (max-iter 10000))
+  (let* ((*random-state* (sb-ext:seed-random-state seed))
+         (rules (mapcar (alexandria:rcurry #'get 'egraph::term-rewrite) rules))
+         (egraph::*term* term)
+         (e^beta (exp beta))
+         (cost (funcall cost-fn term))
+         (best-cost cost)
+         (all-pc 0)
+         (accept-pc 0)
+         #+nil cost-hist)
+    (loop for i below max-iter do
+      (let ((selected-nonce (- (log (random 1.0f0) 2)))
+            (selected-term egraph::*term*)
+            (selected-cost cost))
+        (dolist (rule rules)
+          (funcall rule
+                   (lambda (result)
+                     (let* ((new-cost (funcall cost-fn result))
+                            (1/weight (if (<= new-cost cost) 1.0f0
+                                          (expt e^beta (- new-cost cost))))
+                            (nonce (* (- (log (random 1.0f0) 2)) 1/weight)))
+                       (incf all-pc)
+                       (when (< nonce selected-nonce)
+                         (incf accept-pc)
+                         (setq selected-nonce nonce
+                               selected-term result
+                               selected-cost new-cost))))))
+        (setq egraph::*term* selected-term
+              cost selected-cost)
+        #+nil (push cost cost-hist)
+        (when (< cost best-cost)
+          (print (list i cost egraph::*term*))
+          (setq best-cost cost))))
+    (values cost egraph::*term* all-pc accept-pc #+nil (nreverse cost-hist))))

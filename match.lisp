@@ -92,15 +92,71 @@ TOP-NODE-VAR bound to the enode matching PAT."
                        *fsym-info-var-alist*)
            ,match-body))))
 
+(defmacro do-term ((subterm-var term) &body body)
+  (with-gensyms (process)
+    `(labels ((,process (,subterm-var)
+                ,@body
+                (mapc #',process (cdr ,subterm-var))))
+       (,process ,term))))
+
+(defvar *term*)
+
+(declaim (type function *term-normalizer*))
+(defvar *term-normalizer* #'list)
+
+(defun expand-term-match (bound-vars subst-alist cont-expr)
+  (if subst-alist
+      (bind ((((var fsym . arg-vars) . rest) subst-alist)
+             ((:flet lisp-var (var))
+              (if (member var bound-vars)
+                  (gensym-1 fsym)
+                  (progn (push var bound-vars) var)))
+             (lisp-arg-vars (mapcar #'lisp-var arg-vars))
+             (lhs-bound-p (member var bound-vars))
+             (term-var (lisp-var var)))
+        `(,@(if lhs-bound-p
+                `(let ((,term-var ,var)))
+                `(do-term (,term-var *term*)))
+          (when (eq (car ,term-var) ',fsym)
+            (destructuring-bind ,lisp-arg-vars (cdr ,term-var)
+              (declare (ignorable ,@lisp-arg-vars))
+              (when (and ,@ (mapcan (lambda (lisp-var var)
+                                      (when (and (var-p var) (not (var-p lisp-var)))
+                                        `((equal ,lisp-var ,var))))
+                                    lisp-arg-vars arg-vars))
+                ,(expand-term-match bound-vars rest cont-expr))))))
+      cont-expr))
+
+(defun expand-term-template (tmpl)
+  (labels ((process (tmpl)
+             (cond ((consp tmpl)
+                    `(funcall *term-normalizer* ',(car tmpl)
+                              ,@ (mapcar #'process (cdr tmpl))))
+                   ((var-p tmpl) tmpl)
+                   (t (process (list tmpl))))))
+    (process tmpl)))
+
+(defmacro do-term-matches ((top-term-var pat) &body body)
+  (if (var-p pat) ; Special case for single variable PAT that scans all enodes
+      `(do-term (,pat *term*) (let ((,top-term-var ,pat)) ,@body))
+      (expand-term-match nil (parse-pattern pat top-term-var)
+                         `(locally ,@body))))
+
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
-  `(defun ,name (&key match-limit)
-     (when match-limit
-       (let ((remaining match-limit))
-         (do-matches (top-node ,lhs)
-           (decf remaining)
-           (when (minusp remaining)
-             (error 'match-limit-exceeded :rule ',name :match-limit match-limit)))))
-     (do-matches (top-node ,lhs)
-       (when ,guard
-         (enode-merge top-node ,(expand-template rhs))))))
+  `(progn
+     (defun ,name (&key match-limit)
+       (when match-limit
+         (let ((remaining match-limit))
+           (do-matches (top-node ,lhs)
+             (decf remaining)
+             (when (minusp remaining)
+               (error 'match-limit-exceeded :rule ',name :match-limit match-limit)))))
+       (do-matches (top-node ,lhs)
+         (when ,guard
+           (enode-merge top-node ,(expand-template rhs)))))
+     (setf (get ',name 'term-rewrite)
+           (lambda (cont)
+             (do-term-matches (top-node ,lhs)
+               (funcall cont
+                        (subst ,(expand-term-template rhs) top-node *term*)))))))
