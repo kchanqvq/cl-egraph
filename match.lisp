@@ -166,5 +166,6 @@ TOP-NODE-VAR bound to the enode matching PAT."
      (setf (get ',name 'term-rewrite)
            (lambda (cont)
              (do-term-matches (top-node ,lhs)
-               (funcall cont
-                        (subst ,(expand-term-template rhs) top-node *term*)))))))
+               (when ,guard
+                 (funcall cont
+                          (subst ,(expand-term-template rhs) top-node *term*))))))))
