@@ -54,9 +54,13 @@ this function."
 
 (defun random-search (term rules cost-fn
                       &key (beta 5.0) (seed 0) (max-iter 10000)
-                        (target-cost 0.0) verbose)
+                        (target-cost 0.0) verbose unconditional-rules
+                        (normalizer *term-normalizer*))
   (let* ((*random-state* (sb-ext:seed-random-state seed))
-         (rules (mapcar (alexandria:rcurry #'get 'egraph::term-rewrite) rules))
+         (*term-normalizer* normalizer)
+         (rules (mapcar (alexandria:rcurry #'get 'term-rewrite) rules))
+         (unconditional-rules
+           (mapcar (alexandria:rcurry #'get 'term-rewrite) unconditional-rules))
          (egraph::*term* term)
          (e^beta (exp beta))
          (cost (funcall cost-fn term))
@@ -66,7 +70,15 @@ this function."
          (accept-pc 0)
          #+nil cost-hist)
     (float-features:with-float-traps-masked t
-      (loop for i below max-iter do
+      (dotimes (i max-iter)
+        (dolist (rule unconditional-rules)
+          (funcall rule
+                   (lambda (result)
+                     (let* ((new-cost (funcall cost-fn result)))
+                       (incf all-pc)
+                       (incf accept-pc)
+                       (setq *term* result
+                             cost new-cost)))))
         (let ((selected-nonce (- (log (random 1.0f0) 2)))
               (selected-term egraph::*term*)
               (selected-cost cost))
@@ -83,15 +95,14 @@ this function."
                            (setq selected-nonce nonce
                                  selected-term result
                                  selected-cost new-cost))))))
-          (setq egraph::*term* selected-term
-                cost selected-cost)
-          #+nil (push cost cost-hist)
-          (when (< cost best-cost)
-            (when verbose (print (list i cost egraph::*term*)))
-            (setq best-cost cost
-                  best-term *term*)
-            (when (<= best-cost target-cost)
-              (return))))))
+          (setq *term* selected-term
+                cost selected-cost))
+        (when (< cost best-cost)
+          (when verbose (print (list i cost egraph::*term*)))
+          (setq best-cost cost
+                best-term *term*)
+          (when (<= best-cost target-cost)
+            (return)))))
     (values best-cost best-term
             cost *term*
             all-pc accept-pc #+nil (nreverse cost-hist))))
