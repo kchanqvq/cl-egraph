@@ -11,7 +11,7 @@
            #:build-term #:graph-cost #:tree-cost
            #:greedy-select #:greedy-extract #:lp-select #:lp-extract
 
-           #:*term-normalizer* #:do-term-matches #:random-search))
+           #:*term-normalizer* #:do-term-matches #:stochastic-search))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname
