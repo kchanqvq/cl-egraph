@@ -9,6 +9,7 @@
                :trivia
                :cl-custom-hash-table
                :global-vars
+               :float-features
                :trivial-garbage
                :trivial-package-local-nicknames
                :linear-programming)

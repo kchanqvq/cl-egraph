@@ -53,56 +53,68 @@ this function."
                 (t (return :saturate))))))))
 
 (defun random-search (term rules cost-fn
-                      &key (beta 5.0) (seed 0) (max-iter 10000)
-                        (target-cost 0.0) verbose unconditional-rules
+                      &key (beta (constantly 2.0)) (seed 0)
+                        (max-stall 16000) (max-restart 64)
+                        (target-cost 0.0) verbose
                         (normalizer *term-normalizer*))
-  (let* ((*random-state* (sb-ext:seed-random-state seed))
-         (*term-normalizer* normalizer)
+  (let* ((init-term term)
+         (init-cost (funcall cost-fn term))
          (rules (mapcar (alexandria:rcurry #'get 'term-rewrite) rules))
-         (unconditional-rules
-           (mapcar (alexandria:rcurry #'get 'term-rewrite) unconditional-rules))
-         (egraph::*term* term)
-         (e^beta (exp beta))
-         (cost (funcall cost-fn term))
-         (best-cost cost)
-         (best-term *term*)
-         (all-pc 0)
-         (accept-pc 0)
-         #+nil cost-hist)
+         (*term-normalizer* normalizer)
+         (best-cost init-cost)
+         (best-term init-term)
+         (n-proposal 0)
+         (n-accepted 0))
     (float-features:with-float-traps-masked t
-      (dotimes (i max-iter)
-        (dolist (rule unconditional-rules)
-          (funcall rule
-                   (lambda (result)
-                     (let* ((new-cost (funcall cost-fn result)))
-                       (incf all-pc)
-                       (incf accept-pc)
-                       (setq *term* result
-                             cost new-cost)))))
-        (let ((selected-nonce (- (log (random 1.0f0) 2)))
-              (selected-term egraph::*term*)
-              (selected-cost cost))
-          (dolist (rule rules)
-            (funcall rule
-                     (lambda (result)
-                       (let* ((new-cost (funcall cost-fn result))
-                              (1/weight (if (<= new-cost cost) 1.0f0
-                                            (expt e^beta (- new-cost cost))))
-                              (nonce (* (- (log (random 1.0f0) 2)) 1/weight)))
-                         (incf all-pc)
-                         (when (< nonce selected-nonce)
-                           (incf accept-pc)
-                           (setq selected-nonce nonce
-                                 selected-term result
-                                 selected-cost new-cost))))))
-          (setq *term* selected-term
-                cost selected-cost))
-        (when (< cost best-cost)
-          (when verbose (print (list i cost egraph::*term*)))
-          (setq best-cost cost
-                best-term *term*)
-          (when (<= best-cost target-cost)
-            (return)))))
-    (values best-cost best-term
-            cost *term*
-            all-pc accept-pc #+nil (nreverse cost-hist))))
+      ;; Outer loop: restart with different seeds
+      (block solve
+        (loop for seed from seed below (+ seed max-restart) do
+          ;; Inner loop: one run of stochastic search
+          (let* ((*random-state* (sb-ext:seed-random-state seed))
+                 (*term* init-term)
+                 (cost init-cost)
+                 (best-cost-1 cost)
+                 (n-stall 0))
+            (loop for i from 0 do
+              ;; select a rewrite via reservoir sampling
+              (let ((e^beta (exp (funcall beta i)))
+                    (selected-nonce (- (log (random 1.0f0) 2)))
+                    (selected-term *term*)
+                    (selected-cost cost))
+                (dolist (rule rules)
+                  (funcall rule
+                           (lambda (result)
+                             (let* ((new-cost (funcall cost-fn result))
+                                    (1/weight (if (<= new-cost cost) 1.0f0
+                                                  (expt e^beta (- new-cost cost))))
+                                    (nonce (* (- (log (random 1.0f0) 2)) 1/weight)))
+                               (incf n-proposal)
+                               (when (< nonce selected-nonce)
+                                 (setq selected-nonce nonce
+                                       selected-term result
+                                       selected-cost new-cost))))))
+                (unless (eq *term* selected-term)
+                  (incf n-accepted))
+                (setq *term* selected-term
+                      cost selected-cost)
+                ;; Check for cost function decrease
+                (if (< cost best-cost-1)
+                    (progn
+                      (when verbose
+                        (format t "~&Iteration ~a/~a found ~a ~a~%"
+                                seed i cost *term*))
+                      (setq best-cost-1 cost
+                            n-stall 0)
+                      (when (< cost best-cost)
+                        (setq best-cost cost
+                              best-term *term*)
+                        (when (<= cost target-cost)
+                          (return-from solve))))
+                    (incf n-stall))
+                ;; Check for restart
+                (unless (< n-stall max-stall)
+                  (when verbose
+                    (format t "~&Iteration ~a/~a restart ~a ~a~%"
+                            seed i cost *term*))
+                  (return))))))))
+    (values best-cost best-term n-proposal n-accepted)))
