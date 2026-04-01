@@ -1,44 +1,102 @@
 (in-package :egraph)
 
-(defmacro do-term ((subterm-var term) &body body)
-  (with-gensyms (process)
-    `(labels ((,process (,subterm-var)
+(defmacro do-term ((subterm-var cont-var term cont) &body body)
+  (with-gensyms (process tail revtail result cont-1)
+    `(labels ((,process (,subterm-var ,cont-var)
                 ,@body
                 (when (consp ,subterm-var)
-                  (mapc #',process (cdr ,subterm-var)))))
-       (,process ,term))))
+                  (do ((,tail (cdr ,subterm-var) (cdr ,tail))
+                       (,revtail (list (car ,subterm-var))))
+                      ((null ,tail))
+                    (declare (optimize (space 0))
+                             (dynamic-extent ,revtail))
+                    (flet ((,cont-1 (,result)
+                             (funcall ,cont-var
+                                      (revappend ,revtail (cons ,result (cdr ,tail))))))
+                      (declare (dynamic-extent #',cont-1))
+                      (,process (car ,tail) #',cont-1))
+                    (push (car ,tail) ,revtail)))))
+       (,process ,term ,cont))))
 
 (defvar *term*)
 
 (declaim (type function *term-normalizer*))
 (defvar *term-normalizer* #'list)
 
-(defun expand-term-match (bound-vars subst-alist cont-expr)
-  (if subst-alist
-      (bind ((((var fsym . arg-vars) . rest) subst-alist)
-             ((:flet lisp-var (var))
-              (if (member var bound-vars)
-                  (gensym-1 fsym)
-                  (progn (push var bound-vars) var)))
-             (lisp-arg-vars (mapcar #'lisp-var arg-vars))
-             (lhs-bound-p (member var bound-vars))
-             (term-var (lisp-var var)))
-        `(,@(if lhs-bound-p
-                `(let ((,term-var ,var)))
-                `(do-term (,term-var *term*)))
-          ,(if arg-vars
-               `(when (and (consp ,term-var)
-                           (eq (car ,term-var) ',fsym))
-                  (destructuring-bind ,lisp-arg-vars (cdr ,term-var)
-                    (declare (ignorable ,@lisp-arg-vars))
-                    (when (and ,@ (mapcan (lambda (lisp-var var)
-                                            (when (and (var-p var) (not (var-p lisp-var)))
-                                              `((equal ,lisp-var ,var))))
-                                          lisp-arg-vars arg-vars))
-                      ,(expand-term-match bound-vars rest cont-expr))))
-               `(when (eq ,term-var ',fsym)
-                  ,(expand-term-match bound-vars rest cont-expr)))))
-      cont-expr))
+(defun subst-row (new old pat-row)
+  (maplist (lambda (tail)
+             (if (cdr tail)
+                 (subst new old (car tail))
+                 `(let ((,old ,new))
+                    (declare (ignorable ,old))
+                    ,(car tail))))
+           pat-row))
+
+(defun expand-term-match (var-list pat-mat)
+  (unless var-list
+    (return-from expand-term-match
+      (mapcar #'serapeum:only-elt pat-mat)))
+  ;; pattern column selection heuristics
+  (when pat-mat
+    (setq pat-mat (copy-tree pat-mat)
+          var-list (copy-list var-list))
+    (let* ((columns (butlast (apply #'mapcar #'list pat-mat)))
+           (column-n-tested (mapcar (lambda (c)
+                                      (count-if-not #'var-p (mapcar #'ensure-car c)))
+                                    columns))
+           (selected (position (reduce #'max column-n-tested)
+                               column-n-tested)))
+      (rotatef (car var-list) (nth selected var-list))
+      (mapc (lambda (row)
+              (rotatef (car row) (nth selected row)))
+            pat-mat)))
+  (let ((cons-groups (make-hash-table))
+        (atom-groups (make-hash-table))
+        (var (car var-list))
+        bind-rows
+        cons-clauses
+        atom-clauses)
+    (dolist (pat-row pat-mat)
+      (let ((pat (car pat-row)))
+        (cond ((consp pat)
+               (push pat-row (gethash (car pat) cons-groups)))
+              ((var-p pat)
+               (push pat-row bind-rows))
+              (t
+               (push pat-row (gethash pat atom-groups))))))
+    (maphash-values
+     (lambda (pat-rows)
+       (let* ((sample (caar pat-rows))
+              (arg-vars (make-gensym-list (length (cdr sample)) (car sample))))
+         (push `((,(car sample))
+                 (destructuring-bind ,arg-vars (cdr ,var)
+                   ,@(expand-term-match
+                      (append arg-vars (cdr var-list))
+                      (mapcar (lambda (pat-row)
+                                (append (cdar pat-row) (cdr pat-row)))
+                              pat-rows))))
+               cons-clauses)))
+     cons-groups)
+    (maphash-values
+     (lambda (pat-rows)
+       (push `(,(caar pat-rows)
+               ,@(expand-term-match
+                  (cdr var-list)
+                  (mapcar #'cdr pat-rows)))
+             atom-clauses))
+     atom-groups)
+    (append
+     (expand-term-match
+      (cdr var-list)
+      (mapcar (lambda (pat-row)
+                (subst-row var (car pat-row) (cdr pat-row)))
+              bind-rows))
+     (when (or atom-clauses cons-clauses)
+       `((if (consp ,var)
+             ,(when cons-clauses
+                `(case (car ,var) ,@cons-clauses))
+             ,(when atom-clauses
+                `(case ,var ,@atom-clauses))))))))
 
 (defun expand-term-template (tmpl)
   (labels ((process (tmpl)
@@ -49,13 +107,35 @@
                    (t `',tmpl))))
     (process tmpl)))
 
-(defmacro do-term-matches ((top-term-var pat) &body body)
-  (if (var-p pat) ; Special case for single variable PAT that scans all enodes
-      `(do-term (,pat *term*)
-         (let ((,top-term-var ,pat))
-           (declare (ignorable ,top-term-var))
-           ,@body))
-      (expand-term-match nil (parse-pattern pat top-term-var)
-                         `(locally ,@body))))
+(defun decompose-occur-check (pat cont-expr)
+  (let (vars checks)
+    (labels ((process (pat)
+               (cond ((consp pat)
+                      (cons (car pat)
+                            (mapcar #'process (cdr pat))))
+                     ((var-p pat)
+                      (if (member pat vars)
+                          (let ((new-var (gensym-1 pat)))
+                            (push `(equal ,pat ,new-var) checks)
+                            new-var)
+                          (progn
+                            (push pat vars)
+                            pat)))
+                     (t pat))))
+      (values (process pat)
+              `(when (and ,@checks)
+                 ,cont-expr)))))
 
+(defmacro do-term-matches ((top-term-var cont-var pat cont) &body body)
+  `(do-term-matches* ,top-term-var ,cont-var ,cont
+     (,pat ,@body)))
 
+(defmacro do-term-matches* (top-term-var cont-var cont &rest clauses)
+  (let ((pat-rows (mapcar (lambda (clause)
+                            (multiple-value-list
+                             (decompose-occur-check
+                              (car clause)
+                              `(locally ,@(cdr clause)))))
+                          clauses)))
+    `(do-term (,top-term-var ,cont-var *term* ,cont)
+       ,@(expand-term-match (list top-term-var) pat-rows))))

@@ -107,7 +107,21 @@ TOP-NODE-VAR bound to the enode matching PAT."
            (enode-merge top-node ,(expand-template rhs)))))
      (setf (get ',name 'term-rewrite)
            (lambda (cont)
-             (do-term-matches (top-node ,lhs)
+             (declare (function cont))
+             (do-term-matches (top-node cont-1 ,lhs cont)
                (when ,guard
-                 (funcall cont
-                          (subst ,(expand-term-template rhs) top-node *term*))))))))
+                 (funcall cont-1 ,(expand-term-template rhs))))))))
+
+(defmacro defrw* (name &rest clauses)
+  `(progn
+     (setf (get ',name 'term-rewrite)
+           (lambda (cont)
+             (declare (function cont))
+             (do-term-matches* top-node cont-1 cont
+               ,@(mapcar (lambda (clause)
+                           (destructuring-bind
+                               (lhs rhs &key (guard t)) clause
+                             `(,lhs
+                               (when ,guard
+                                 (funcall cont-1 ,(expand-term-template rhs))))))
+                         clauses))))))
