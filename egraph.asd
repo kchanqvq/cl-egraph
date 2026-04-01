@@ -18,7 +18,10 @@
                (:file "match")
                (:file "run")
                (:file "extract")
-               (:file "user"))
+               (:file "user")
+               (:module "stochastic"
+                :components ((:file "match")
+                             (:file "run"))))
   :in-order-to ((test-op (test-op "egraph/tests"))))
 
 (asdf:defsystem #:egraph/tests
