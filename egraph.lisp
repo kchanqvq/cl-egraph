@@ -58,14 +58,14 @@ representativeness."
   t)
 
 (defun term-hash (x)
-  (let ((hash (sxhash (car x))))
+  (let ((hash (sxhash (car x)))
+        (mul (logand 3622009729038463111 most-positive-fixnum))
+        (xor (logand 608948948376289905 most-positive-fixnum)))
     (declare (type non-negative-fixnum hash))
     (dolist (i (cdr x))
       ;; Copied sb-c::mix
-      (let* ((mul (logand 3622009729038463111 most-positive-fixnum))
-             (xor (logand 608948948376289905 most-positive-fixnum))
-             (xy (logand (+ (* hash mul) (enode-hash-code i)) most-positive-fixnum)))
-        (setq hash (logand (logxor xor xy (ash xy -5)) most-positive-fixnum))))
+      (setq hash (logand (+ hash (* (enode-hash-code i) mul)) most-positive-fixnum))
+      (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     hash))
 
 (cl-custom-hash-table:define-custom-hash-table-constructor make-hash-cons
