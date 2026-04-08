@@ -12,7 +12,8 @@
                :float-features
                :trivial-garbage
                :trivial-package-local-nicknames
-               :linear-programming)
+               :linear-programming
+               :bordeaux-threads)
   :components ((:file "package")
                (:file "egraph")
                (:file "match")
