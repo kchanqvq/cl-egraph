@@ -32,8 +32,7 @@
                 (let ((enode (gethash class selections)))
                   (reduce #'+ (cdr (enode-term enode))
                           :key #'process :initial-value (funcall cost-fn enode))))))
-      (process (enode-find enode))
-      memo)))
+      (process (enode-find enode)))))
 
 (defun greedy-select (cost-fn)
   (let ((costs (make-hash-table))        ; map eclass to cost
