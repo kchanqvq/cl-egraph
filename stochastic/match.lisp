@@ -4,24 +4,19 @@
   (with-gensyms (process tail revtail result cont-1)
     `(labels ((,process (,subterm-var ,cont-var)
                 ,@body
-                (when (consp ,subterm-var)
-                  (do ((,tail (cdr ,subterm-var) (cdr ,tail))
-                       (,revtail (list (car ,subterm-var))))
-                      ((null ,tail))
-                    (declare (optimize (space 0))
-                             (dynamic-extent ,revtail))
-                    (flet ((,cont-1 (,result)
-                             (funcall ,cont-var
-                                      (revappend ,revtail (cons ,result (cdr ,tail))))))
-                      (declare (dynamic-extent #',cont-1))
-                      (,process (car ,tail) #',cont-1))
-                    (push (car ,tail) ,revtail)))))
+                (do ((,tail (node-args ,subterm-var) (cdr ,tail))
+                     (,revtail))
+                    ((null ,tail))
+                  (declare (optimize (space 0))
+                           (dynamic-extent ,revtail))
+                  (flet ((,cont-1 (,result)
+                           (funcall ,cont-var
+                                    (apply *term-normalizer* (node-fsym ,subterm-var)
+                                           (revappend ,revtail (cons ,result (cdr ,tail)))))))
+                    (declare (dynamic-extent #',cont-1))
+                    (,process (car ,tail) #',cont-1))
+                  (push (car ,tail) ,revtail))))
        (,process ,term ,cont))))
-
-(defvar *term*)
-
-(declaim (type function *term-normalizer*))
-(defvar *term-normalizer* #'list)
 
 (defun subst-row (new old pat-row)
   (maplist (lambda (tail)
@@ -50,62 +45,63 @@
       (mapc (lambda (row)
               (rotatef (car row) (nth selected row)))
             pat-mat)))
-  (let ((cons-groups (make-hash-table))
-        (atom-groups (make-hash-table))
+  (let ((groups (make-hash-table))
         (var (car var-list))
         bind-rows
-        cons-clauses
-        atom-clauses)
+        clauses)
     (dolist (pat-row pat-mat)
       (let ((pat (car pat-row)))
         (cond ((consp pat)
-               (push pat-row (gethash (car pat) cons-groups)))
+               (push pat-row (gethash (car pat) groups)))
               ((var-p pat)
                (push pat-row bind-rows))
               (t
-               (push pat-row (gethash pat atom-groups))))))
+               (push pat-row (gethash pat groups))))))
     (maphash-values
      (lambda (pat-rows)
-       (let* ((sample (caar pat-rows))
-              (arg-vars (make-gensym-list (length (cdr sample)) (car sample))))
+       (let* ((sample (ensure-list (caar pat-rows)))
+              (arg-vars (make-gensym-list (length (cdr sample))
+                                          (prin1-to-string (car sample)))))
          (push `((,(car sample))
-                 (destructuring-bind ,arg-vars (cdr ,var)
+                 (destructuring-bind ,arg-vars (node-args ,var)
+                   (declare (node ,@arg-vars))
                    ,@(expand-term-match
                       (append arg-vars (cdr var-list))
                       (mapcar (lambda (pat-row)
-                                (append (cdar pat-row) (cdr pat-row)))
+                                (append (cdr (ensure-list (car pat-row)))
+                                        (cdr pat-row)))
                               pat-rows))))
-               cons-clauses)))
-     cons-groups)
-    (maphash-values
-     (lambda (pat-rows)
-       (push `(,(caar pat-rows)
-               ,@(expand-term-match
-                  (cdr var-list)
-                  (mapcar #'cdr pat-rows)))
-             atom-clauses))
-     atom-groups)
+               clauses)))
+     groups)
     (append
      (expand-term-match
       (cdr var-list)
       (mapcar (lambda (pat-row)
                 (subst-row var (car pat-row) (cdr pat-row)))
               bind-rows))
-     (when (or atom-clauses cons-clauses)
-       `((if (consp ,var)
-             ,(when cons-clauses
-                `(case (car ,var) ,@cons-clauses))
-             ,(when atom-clauses
-                `(case ,var ,@atom-clauses))))))))
+     (when clauses
+       `((case (node-fsym ,var) ,@clauses))))))
 
 (defun expand-term-template (tmpl)
   (labels ((process (tmpl)
              (cond ((consp tmpl)
                     `(funcall *term-normalizer* ',(car tmpl)
-                              ,@ (mapcar #'process (cdr tmpl))))
+                              ,@(mapcar #'process (cdr tmpl))))
                    ((var-p tmpl) tmpl)
-                   (t `',tmpl))))
+                   (t (process (list tmpl))))))
     (process tmpl)))
+
+(defun node-equal (x y)
+  (unless (eql (node-fsym x) (node-fsym y))
+    (return-from node-equal nil))
+  (let ((x (node-args x))
+        (y (node-args y)))
+    (loop
+      (unless (or x y) (return))
+      (unless (node-equal (car x) (car y))
+        (return-from node-equal nil))
+      (setq x (cdr x) y (cdr y))))
+  t)
 
 (defun decompose-occur-check (pat cont-expr)
   (let (vars checks)
@@ -116,7 +112,7 @@
                      ((var-p pat)
                       (if (member pat vars)
                           (let ((new-var (gensym-1 pat)))
-                            (push `(equal ,pat ,new-var) checks)
+                            (push `(node-equal ,pat ,new-var) checks)
                             new-var)
                           (progn
                             (push pat vars)
@@ -129,6 +125,15 @@
 (defmacro do-term-matches ((top-term-var cont-var pat cont) &body body)
   `(do-term-matches* ,top-term-var ,cont-var ,cont
      (,pat ,@body)))
+
+(defmacro do-term-matches*-1 (top-term-var &rest clauses)
+  (let ((pat-rows (mapcar (lambda (clause)
+                            (multiple-value-list
+                             (decompose-occur-check
+                              (car clause)
+                              `(locally ,@(cdr clause)))))
+                          clauses)))
+    `(progn ,@(expand-term-match (list top-term-var) pat-rows))))
 
 (defmacro do-term-matches* (top-term-var cont-var cont &rest clauses)
   (let ((pat-rows (mapcar (lambda (clause)

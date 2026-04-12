@@ -21,7 +21,8 @@
                (:file "extract")
                (:file "user")
                (:module "stochastic"
-                :components ((:file "match")
+                :components ((:file "node")
+                             (:file "match")
                              (:file "run"))))
   :in-order-to ((test-op (test-op "egraph/tests"))))
 

@@ -124,4 +124,15 @@ TOP-NODE-VAR bound to the enode matching PAT."
                              `(,lhs
                                (when ,guard
                                  (funcall cont-1 ,(expand-term-template rhs))))))
+                         clauses))))
+     (setf (get ',name 'term-rewrite-1)
+           (lambda (top-node cont)
+             (declare (function cont))
+             (do-term-matches*-1 top-node
+               ,@(mapcar (lambda (clause)
+                           (destructuring-bind
+                               (lhs rhs &key (guard t)) clause
+                             `(,lhs
+                               (when ,guard
+                                 (funcall cont ,(expand-term-template rhs))))))
                          clauses))))))
