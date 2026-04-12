@@ -57,9 +57,7 @@ evaluate CONT-EXPR."
   "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
   (labels ((process (tmpl)
              (cond ((consp tmpl)
-                    `(let ((list (list ',(car tmpl) ,@ (mapcar #'process (cdr tmpl)))))
-                       (declare (dynamic-extent list))
-                       (make-enode list)))
+                    `(make-enode ',(car tmpl) ,@(mapcar #'process (cdr tmpl))))
                    ((var-p tmpl) tmpl)
                    (t (process (list tmpl))))))
     (process tmpl)))

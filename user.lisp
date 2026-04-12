@@ -2,9 +2,9 @@
 
 (defun make-term (term)
   (typecase term
-    (cons (make-enode (cons (car term) (mapcar #'make-term (cdr term)))))
+    (cons (apply #'make-enode (car term) (mapcar #'make-term (cdr term))))
     (enode term)
-    (t (make-enode (list term)))))
+    (t (make-enode term))))
 
 (declaim (inline orp make-orp))
 

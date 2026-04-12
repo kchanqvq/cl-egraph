@@ -17,8 +17,8 @@
 
 (def-test union-find ()
   (let* ((*egraph* (make-egraph))
-         (x (make-enode (list 1)))
-         (y (make-enode (list 2))))
+         (x (make-enode 1))
+         (y (make-enode 2)))
     (is (eq (enode-find x) x))
     (is (eq (enode-find y) y))
     (enode-merge x y)
@@ -40,14 +40,14 @@
 
 (def-test rebuild ()
   (let* ((*egraph* (make-egraph))
-         (a (make-enode (list 'a)))
-         (b (make-enode (list 'b)))
-         (f-a (make-enode (list 'f a)))
-         (f-b (make-enode (list 'f b)))
-         (g-a (make-enode (list 'g a)))
-         (g-b (make-enode (list 'g b)))
-         (f-f-a (make-enode (list 'f f-a)))
-         (f-f-b (make-enode (list 'f f-b))))
+         (a (make-enode 'a))
+         (b (make-enode 'b))
+         (f-a (make-enode 'f a))
+         (f-b (make-enode 'f b))
+         (g-a (make-enode 'g a))
+         (g-b (make-enode 'g b))
+         (f-f-a (make-enode 'f f-a))
+         (f-f-b (make-enode 'f f-b)))
     (enode-merge a b)
     (is (eq (enode-find a) (enode-find b)))
     (is (every #'enode-canonical-p (list-enodes a)))
@@ -71,10 +71,10 @@
 
 (def-test rebuild-cyclic ()
   (let* ((*egraph* (make-egraph))
-         (a (make-enode (list 'a)))
-         (f-a (make-enode (list 'f a)))
-         (f-f-a (make-enode (list 'f f-a)))
-         (f-f-f-a (make-enode (list 'f f-f-a))))
+         (a (make-enode 'a))
+         (f-a (make-enode 'f a))
+         (f-f-a (make-enode 'f f-a))
+         (f-f-f-a (make-enode 'f f-f-a)))
     (enode-merge a f-a)
     (egraph-rebuild)
     (is (eq (enode-find a) (enode-find f-a)))
@@ -200,9 +200,7 @@
   :merge (make-orp #'=)
   :modify (lambda (node data)
             (when data
-              (let* ((term (list data))
-                     (const (make-enode term)))
-                (declare (dynamic-extent term))
+              (let* ((const (make-enode data)))
                 (enode-merge node const)
                 (setf (egraph::eclass-info-nodes (enode-eclass-info node))
                       (list const))))))
@@ -263,7 +261,7 @@
 
 (def-test bench.math (:suite :egraph/bench)
   (let ((timer (make-instance 'benchmark:timer)))
-    (loop for i from 1 to 3 do
+    (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
@@ -287,7 +285,7 @@
 
 (def-test bench.analysis-ac (:suite :egraph/bench)
   (let ((timer (make-instance 'benchmark:timer)))
-    (loop for i from 1 to 3 do
+    (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph :analyses 'const)))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)

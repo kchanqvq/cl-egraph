@@ -32,9 +32,7 @@
   :merge (make-orp #'=)
   :modify (lambda (node data)
             (when data
-              (let* ((term (list data))
-                     (const (make-enode term)))
-                (declare (dynamic-extent term))
+              (let ((const (make-enode data)))
                 (enode-merge node const)
                 (setf (egraph::eclass-info-nodes (enode-eclass-info node))
                       (list const))))))
