@@ -18,18 +18,23 @@ NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
 (declaim (type non-negative-fixnum *hash-code*))
 (global-vars:define-global-var *hash-code* 0)
 
-(defstruct (enode (:constructor %make-enode))
+(defstruct (node (:constructor %make-node))
+  (fsym) (args))
+
+(defstruct (hash-node (:include node) (:constructor %make-hash-node))
+  (hash-code
+   (setf *hash-code*
+         (logand (1+ *hash-code*) most-positive-fixnum))
+   :type fixnum))
+
+(defstruct (enode (:include hash-node) (:constructor %make-enode))
   "PARENT is either another enode in the same eclass, or an `eclass-info' if this
 enode is the representative of its own eclass.
 
 Set CANONICAL-FLAG to NIL to mark the node as non-canonical. `egraph-rebuild'
 trusts this information to avoid testing all term arguments for
 representativeness."
-  (term) (parent)
-  (hash-code
-   (setf *hash-code*
-         (logand (1+ *hash-code*) most-positive-fixnum))
-   :type fixnum)
+  (parent)
   (canonical-flag t :type boolean))
 
 ;; Be aware that representative enode might be non-canonical!
@@ -37,34 +42,36 @@ representativeness."
   (eclass-info-p (enode-parent enode)))
 
 (defun enode-canonical-p (enode)
-  (every #'enode-representative-p (cdr (enode-term enode))))
+  (every #'enode-representative-p (enode-args enode)))
 
 (defun enode-eclass-info (enode)
   (enode-parent (enode-find enode)))
 
 (defmethod print-object ((self enode) stream)
   (print-unreadable-object (self stream :type t :identity t)
-    (format stream "~:[~;REP ~]~a" (enode-representative-p self) (enode-term self))))
+    (format stream "~:[~;REP ~]~a" (enode-representative-p self)
+            (cons (enode-fsym self) (enode-args self)))))
 
 (defun term-equal (x y)
-  (unless (eql (car x) (car y))
+  (unless (eql (node-fsym x) (node-fsym y))
     (return-from term-equal nil))
-  (setq x (cdr x) y (cdr y))
-  (loop
-    (unless (or x y) (return))
-    (unless (eq (car x) (car y))
-      (return-from term-equal nil))
-    (setq x (cdr x) y (cdr y)))
+  (let ((x (node-args x))
+        (y (node-args y)))
+    (loop
+      (unless (or x y) (return))
+      (unless (eq (car x) (car y))
+        (return-from term-equal nil))
+      (setq x (cdr x) y (cdr y))))
   t)
 
 (defun term-hash (x)
-  (let ((hash (sxhash (car x)))
+  (let ((hash (sxhash (node-fsym x)))
         (mul (logand 3622009729038463111 most-positive-fixnum))
         (xor (logand 608948948376289905 most-positive-fixnum)))
     (declare (type non-negative-fixnum hash))
-    (dolist (i (cdr x))
+    (dolist (i (node-args x))
       ;; Copied sb-c::mix
-      (setq hash (logand (+ hash (* (enode-hash-code i) mul)) most-positive-fixnum))
+      (setq hash (logand (+ hash (* (hash-node-hash-code i) mul)) most-positive-fixnum))
       (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     hash))
 
@@ -169,19 +176,21 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (declare (optimize speed (space 0))
            (dynamic-extent args))
   (let* ((args (mapcar #'enode-find args))
-         (term (cons fsym args)))
-    (or (gethash term (egraph-hash-cons *egraph*))
+         (key-node (%make-node :fsym fsym :args args)))
+    (declare (dynamic-extent key-node))
+    (or (gethash key-node (egraph-hash-cons *egraph*))
         (lret ((data-vec (make-array (length (egraph-analysis-info-list *egraph*))
                                      :initial-element 'unbound))
-               (enode (%make-enode :term term)))
+               (enode (%make-enode :fsym fsym :args args)))
           (setf (enode-parent enode)
                 (%make-eclass-info :nodes (list enode) :analysis-data-vec data-vec))
           (dolist (arg args)
             (push enode (eclass-info-parents (enode-parent arg)))
             (incf (eclass-info-n-parents (enode-parent arg))))
-          (setf (gethash term (egraph-hash-cons *egraph*)) enode)
+          (setf (gethash enode (egraph-hash-cons *egraph*)) enode)
           (make-analysis-data data-vec enode)
-          (modify-analysis-data enode)))))
+          (modify-analysis-data enode)
+          enode))))
 
 (-> enode-merge (enode enode) null)
 (defun enode-merge (x y)
@@ -213,8 +222,8 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (loop
     (let ((enode (pop (egraph-work-list *egraph*))))
       (unless enode (return))
-      (remhash (enode-term enode) (egraph-hash-cons *egraph*))
-      (enode-merge (apply #'make-enode (enode-term enode)) enode)))
+      (remhash enode (egraph-hash-cons *egraph*))
+      (enode-merge (apply #'make-enode (enode-fsym enode) (enode-args enode)) enode)))
   ;; Update analysis
   (loop
     (let ((enode (pop (egraph-analysis-work-list *egraph*))))
@@ -249,7 +258,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
                           (eclass-info-n-parents info)
                           (length (eclass-info-parents info)))
                     (dolist (node (eclass-info-nodes info))
-                      (let ((fsym-info (ensure-gethash (car (enode-term node)) (egraph-fsym-table *egraph*)
+                      (let ((fsym-info (ensure-gethash (enode-fsym node) (egraph-fsym-table *egraph*)
                                                        (make-fsym-info))))
                         (push node (gethash class (fsym-info-node-table fsym-info)))
                         (push node (fsym-info-nodes fsym-info))))))
@@ -282,18 +291,18 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
       (let ((nodes (list-enodes class)))
         (dolist (node nodes)
           (if (enode-canonical-p node)
-              (dolist (arg (cdr (enode-term node)))
+              (dolist (arg (enode-args node))
                 (unless (member node (eclass-info-parents (enode-parent arg)))
                   (error "Missing parent link from ~a to ~a" arg node)))
               (error "Non canonical node ~a on ~a's node list" node class)))
         (unless (= (length nodes)
-                   (length (remove-duplicates nodes :test 'equal :key #'enode-term)))
+                   (length (remove-duplicates nodes :test 'term-equal)))
           (warn "Duplicates in ~a's enodes:~% ~a" class nodes)))
       (let ((parents (eclass-info-parents (enode-parent class))))
         (dolist (node parents)
           (unless (enode-canonical-p node)
             (error "Non canonical ~a on ~a's parent list" node class))
-          (unless (member class (cdr (enode-term node)))
+          (unless (member class (enode-args node))
             (error "Extra parent link from ~a to ~a" class node)))
         ;; Currently we allow duplicates in parent list
         (incf n-parent-list (length parents))

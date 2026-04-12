@@ -44,7 +44,7 @@ evaluate CONT-EXPR."
         `(dolist (,node-var ,(if lhs-bound-p
                                  `(gethash ,var (fsym-info-node-table ,fsym-info-var))
                                  `(fsym-info-nodes ,fsym-info-var)))
-           (destructuring-bind ,lisp-arg-vars (cdr (enode-term ,node-var))
+           (destructuring-bind ,lisp-arg-vars (enode-args ,node-var)
              (declare (ignorable ,@lisp-arg-vars))
              (when (and ,@ (mapcan (lambda (lisp-var var)
                                      (when (and (var-p var) (not (var-p lisp-var)))

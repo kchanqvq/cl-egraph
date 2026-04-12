@@ -1,5 +1,5 @@
 (uiop:define-package :egraph/tests
-    (:use #:cl #:egraph)
+    (:use #:cl #:egraph #:alexandria)
   (:import-from #:fiveam
                 #:def-suite* #:def-suite
                 #:def-test #:is #:in-suite))
@@ -181,22 +181,22 @@
 
 (define-analysis const
   :make (lambda (enode)
-          (bind:bind (((fsym . args) (enode-term enode)))
-                     (if args
-                         (block nil
-                           (let ((args (mapcar (lambda (enode)
-                                                 (or (const enode) (return)))
-                                               args)))
-                             ;; Guard against things like division by zero
-                             (ignore-errors
-                              (let* ((result (apply fsym args)))
-                                ;; Coerce integral float into integer
-                                (if (floatp result)
-                                    (multiple-value-bind (int frac) (truncate result (float 1.0 result))
-                                      (if (zerop frac) int result))
-                                    result)))))
-                         (when (numberp fsym)
-                           fsym))))
+          (let ((fsym (enode-fsym enode)))
+            (if-let (args (enode-args enode))
+              (block nil
+                (let ((args (mapcar (lambda (enode)
+                                      (or (const enode) (return)))
+                                    args)))
+                  ;; Guard against things like division by zero
+                  (ignore-errors
+                   (let* ((result (apply fsym args)))
+                     ;; Coerce integral float into integer
+                     (if (floatp result)
+                         (multiple-value-bind (int frac) (truncate result (float 1.0 result))
+                           (if (zerop frac) int result))
+                         result)))))
+              (when (numberp fsym)
+                fsym))))
   :merge (make-orp #'=)
   :modify (lambda (node data)
             (when data
@@ -218,15 +218,16 @@
 
 (define-analysis var
   :make (lambda (enode)
-          (trivia:match (enode-term enode)
-            ((list (and v (type symbol))) v)))
+          (when (and (null (enode-args enode))
+                     (symbolp (enode-fsym enode)))
+            (enode-fsym enode)))
   :merge (make-orp #'eq))
 
 (defrw d-var (d ?x ?x) 1 :guard (var ?x))
 (defrw d-const (d ?x ?c) 0 :guard (or (const ?c)
-                                      (alexandria:when-let* ((vx (var ?x))
-                                                             (vc (var ?c)))
-                                                            (not (eq vx vc)))))
+                                      (when-let* ((vx (var ?x))
+                                                  (vc (var ?c)))
+                                        (not (eq vx vc)))))
 
 (def-test analysis.multiple.1 ()
   (let* ((*egraph* (make-egraph :analyses '(var const)))

@@ -1,5 +1,5 @@
 (uiop:define-package :egraph/tests/math
-    (:use #:cl #:egraph)
+    (:use #:cl #:egraph #:alexandria)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
 (serapeum:eval-always
@@ -12,8 +12,8 @@
 
 (define-analysis const
   :make (lambda (enode)
-          (bind:bind (((fsym . args) (enode-term enode)))
-            (if args
+          (let ((fsym (enode-fsym enode)))
+            (if-let (args (enode-args enode))
                 (block nil
                   (let ((args (mapcar (lambda (enode)
                                         (or (const enode)
@@ -39,8 +39,9 @@
 
 (define-analysis var
   :make (lambda (enode)
-          (trivia:match (enode-term enode)
-            ((list (and v (type symbol))) v)))
+          (when (and (null (enode-args enode))
+                     (symbolp (enode-fsym enode)))
+            (enode-fsym enode)))
   :merge (make-orp #'eq))
 
 (defrw commute-add (+ ?a ?b) (+ ?b ?a))
@@ -80,8 +81,8 @@
 
 (defrw d-var (d ?x ?x) 1 :guard (var ?x))
 (defrw d-const (d ?x ?c) 0 :guard (or (const ?c)
-                                      (alexandria:when-let* ((vx (var ?x))
-                                                             (vc (var ?c)))
+                                      (when-let* ((vx (var ?x))
+                                                  (vc (var ?c)))
                                         (not (eq vx vc)))))
 (defrw d-add (d ?x (+ ?a ?b)) (+ (d ?x ?a) (d ?x ?b)))
 (defrw d-mul (d ?x (* ?a ?b)) (+ (* ?a (d ?x ?b)) (* ?b (d ?x ?a))))
@@ -140,14 +141,14 @@
 
 (def-test bench.math.diff (:suite :egraph/bench)
   (let ((timer (make-instance 'benchmark:timer)))
-    (loop for i from 1 to 3 do
+    (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph :analyses '(var const))))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
         (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
-          (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000))))
+          (run-rewrites *math-rules* :max-iter 14))))
     (benchmark:report timer)))
 
 (def-math-test math.integral-part.1 ()

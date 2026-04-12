@@ -5,10 +5,10 @@
     (labels ((process (class)
                (ensure-gethash
                 class memo
-                (let ((term (enode-term (gethash class selections))))
-                  (if (cdr term)
-                      (cons (car term) (mapcar #'process (cdr term)))
-                      (car term))))))
+                (let ((enode (gethash class selections)))
+                  (if (enode-args enode)
+                      (cons (enode-fsym enode) (mapcar #'process (enode-args enode)))
+                      (enode-fsym enode))))))
       (process (enode-find enode)))))
 
 (defun graph-cost (enode selections cost-fn)
@@ -19,7 +19,7 @@
                 class memo
                 (let ((enode (gethash class selections)))
                   (incf cost (funcall cost-fn enode))
-                  (mapc #'process (cdr (enode-term enode)))
+                  (mapc #'process (enode-args enode))
                   t))))
       (process (enode-find enode))
       cost)))
@@ -30,7 +30,7 @@
                (ensure-gethash
                 class memo
                 (let ((enode (gethash class selections)))
-                  (reduce #'+ (cdr (enode-term enode))
+                  (reduce #'+ (enode-args enode)
                           :key #'process :initial-value (funcall cost-fn enode))))))
       (process (enode-find enode)))))
 
@@ -43,10 +43,10 @@
                         (let ((selection (gethash class selections))
                               (cost (gethash class costs)))
                           (dolist (enode (list-enodes class))
-                            (let* ((term (enode-term enode))
-                                   (new-cost
-                                     (funcall cost-fn enode
-                                              (mapcar (rcurry #'gethash costs) (cdr term)))))
+                            (let ((new-cost
+                                    (funcall cost-fn enode
+                                             (mapcar (rcurry #'gethash costs)
+                                                     (enode-args enode)))))
                               (when (if cost (and new-cost (< new-cost cost))
                                         new-cost)
                                 (setf selection enode
@@ -87,12 +87,12 @@ cost of its root node."
                ;; Return a lp var or NIL. NIL is returned if there's back edge
                ;; to a visiting eclass, therefore this enode is not processed
                (unless (some (lambda (class) (eq (gethash class class-vars) 'visiting))
-                             (cdr (enode-term enode)))
+                             (enode-args enode))
                  (lret ((cost (funcall cost-fn enode))
-                        (var (gensym-1 (car (enode-term enode)))))
+                        (var (gensym-1 (enode-fsym enode))))
                    (setf (gethash enode enode-vars) var)
                    (push `(lp:* ,cost ,var) objective-terms)
-                   (dolist (class (cdr (enode-term enode)))
+                   (dolist (class (enode-args enode))
                      (push `(lp:<= ,var ,(visit-class class)) constraints))))))
       (dolist (enode (ensure-list enode))
         (push `(lp:<= 1 ,(visit-class (enode-find enode))) constraints)))
