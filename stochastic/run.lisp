@@ -5,10 +5,11 @@
                             (max-stall 16000) (max-restart 64)
                             (target-cost 0.0) verbose
                             (normalizer *term-normalizer*)
-                            (nproc 1))
+                            (nproc 1) max-time)
   (let (finish
         (init-term term)
-        (init-cost (funcall cost-fn term)))
+        (init-cost (funcall cost-fn term))
+        (start-time (get-internal-real-time)))
     (flet ((search-1 (seed stride)
              (let* ((rules (mapcar (alexandria:rcurry #'get 'term-rewrite) rules))
                     (*term-normalizer* normalizer)
@@ -32,8 +33,12 @@
                                (selected-nonce (- (log (random 1.0f0) 2)))
                                (selected-term *term*)
                                (selected-cost cost))
-                           (when finish (return-from search-1
-                                          (values best-cost best-term n-proposal n-accepted)))
+                           (when (or finish
+                                     (and max-time
+                                          (> (/ (- (get-internal-real-time) start-time)
+                                                internal-time-units-per-second)
+                                             max-time)))
+                             (return-from solve))
                            (dolist (rule rules)
                              (funcall rule
                                       (lambda (result)

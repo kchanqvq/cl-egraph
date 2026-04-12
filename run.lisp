@@ -1,6 +1,6 @@
 (in-package :egraph)
 
-(defun run-rewrites (rules &key max-iter check verbose
+(defun run-rewrites (rules &key max-iter max-time check verbose
                              initial-match-limit
                              (initial-ban-length 5))
   "Run RULES repeatly on `*egraph*' until some stop criterion.
@@ -17,11 +17,16 @@ this function."
         (n-eclasses (egraph-n-eclasses *egraph*))
         (n-iter 0)
         (ban-until-table (make-hash-table))
-        (ban-times-table (make-hash-table)))
+        (ban-times-table (make-hash-table))
+        (start-time (get-internal-real-time)))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))
           (return :max-iter))
+        (when (and max-time (>= (/ (- (get-internal-real-time) start-time)
+                                   internal-time-units-per-second)
+                                max-time))
+          (return :max-time))
         (when verbose (format t "Iteration ~d: " n-iter))
         (when verbose (format t "Applying rules... "))
         (unwind-protect
