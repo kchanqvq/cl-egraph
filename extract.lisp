@@ -3,12 +3,16 @@
 (defun build-term (enode selections)
   (let ((memo (make-hash-table)))       ; used to preserve sharing
     (labels ((process (class)
-               (ensure-gethash
-                class memo
-                (let ((enode (gethash class selections)))
-                  (if (enode-args enode)
-                      (cons (enode-fsym enode) (mapcar #'process (enode-args enode)))
-                      (enode-fsym enode))))))
+               (case (gethash class memo)
+                 (visiting (error "Cycle"))
+                 ((nil)
+                  (setf (gethash class memo) 'visiting)
+                  (setf (gethash class memo)
+                        (let ((enode (gethash class selections)))
+                          (if (enode-args enode)
+                              (cons (enode-fsym enode) (mapcar #'process (enode-args enode)))
+                              (enode-fsym enode)))))
+                 (t (gethash class memo)))))
       (process (enode-find enode)))))
 
 (defun graph-cost (enode selections cost-fn)

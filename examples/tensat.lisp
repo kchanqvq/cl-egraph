@@ -5,10 +5,6 @@
 
 (in-package :egraph/examples/tensat)
 
-(defun enode-value (enode)
-  (assert (null (cdr (enode-term enode))))
-  (car (enode-term enode)))
-
 (defmacro defrw2 (name lhs rhs)
   `(progn
      (defrw ,name ,lhs ,rhs)
@@ -65,11 +61,11 @@
       (let ((xs (shape x))
             (ys (shape y)))
         (flet ((gen-concat (axis)
-                 (let* ((concat (make-enode (list 'concat (make-enode (list axis)) x y)))
-                        (n (make-enode (list (nth axis xs))))
-                        (axis (make-enode (list axis))))
-                   (enode-merge x (make-enode (list 'split-0 axis n concat)))
-                   (enode-merge y (make-enode (list 'split-1 axis n concat))))))
+                 (let* ((concat (make-enode 'concat (make-enode axis) x y))
+                        (n (make-enode (nth axis xs)))
+                        (axis (make-enode axis)))
+                   (enode-merge x (make-enode 'split-0 axis n concat))
+                   (enode-merge y (make-enode 'split-1 axis n concat)))))
           (when (= (length xs) (length ys))
             (let* ((matchps (mapcar #'= xs ys))
                    (n-unmatch (count nil matchps)))
@@ -112,23 +108,23 @@
 
 (define-analysis shape
   :make (lambda (enode)
-          (trivia:match (enode-term enode)
-            ((list* (or 'input 'weight) args) (mapcar #'enode-value args))
+          (trivia:match (cons (enode-fsym enode) (enode-args enode))
+            ((list* (or 'input 'weight) args) (mapcar #'enode-fsym args))
             ((list 'conv2d stride-h stride-w pmode _ input kernel)
              (bind (((input-0 _ input-h input-w) (shape input))
                     ((kernel-0 _ kernel-h kernel-w) (shape kernel)))
                (list* input-0 kernel-0
-                      (compute-pad-dims (enode-value pmode) input-h input-w
-                                        (enode-value stride-h) (enode-value stride-w)
+                      (compute-pad-dims (enode-fsym pmode) input-h input-w
+                                        (enode-fsym stride-h) (enode-fsym stride-w)
                                         kernel-h kernel-w))))
             ((list 'poolmax kernel-h kernel-w stride-h stride-w pmode input)
              (bind (((input-0 input-1 input-h input-w) (shape input)))
                (list* input-0 input-1
-                      (compute-pad-dims (enode-value pmode) input-h input-w
-                                        (enode-value stride-h) (enode-value stride-w)
-                                        (enode-value kernel-h) (enode-value kernel-w)))))
+                      (compute-pad-dims (enode-fsym pmode) input-h input-w
+                                        (enode-fsym stride-h) (enode-fsym stride-w)
+                                        (enode-fsym kernel-h) (enode-fsym kernel-w)))))
             ((list 'concat axis x y)
-             (let ((axis (enode-value axis))
+             (let ((axis (enode-fsym axis))
                    (xdims (shape x)) (ydims (shape y)))
                (assert (= (length xdims) (length ydims)))
                (loop for i from 0
@@ -137,11 +133,11 @@
                      collect (if (= i axis) (+ xdim ydim)
                                  (progn (assert (= xdim ydim)) xdim)))))
             ((list* 'reshape input dims)
-             (lret ((dims (mapcar #'enode-value dims)))
+             (lret ((dims (mapcar #'enode-fsym dims)))
                (assert (= (reduce #'* dims) (reduce #'* (shape input))))
                dims))
             ((list* 'transpose-nd input perms)
-             (mapcar (rcurry #'nth (shape input)) (mapcar #'enode-value perms)))
+             (mapcar (rcurry #'nth (shape input)) (mapcar #'enode-fsym perms)))
             ((list* (or 'relu 'ewadd 'ewmul) args)
              (lret ((shape (shape (car args))))
                (dolist (arg (cdr args))
@@ -156,7 +152,7 @@
                  (values x nil)))))
 
 (defun flop-cost (enode)
-  (trivia:match (enode-term enode)
+  (trivia:match (cons (enode-fsym enode) (enode-args enode))
     ((list* (or 'ewadd 'ewmul) _) (reduce #'* (shape enode)))
     ;; FIXME: Somehow this does not affect resnext-50...
     ((list* 'conv2d children)
@@ -168,9 +164,8 @@
 (define-analysis cost
   :make (lambda (enode)
           (+ (flop-cost enode)
-             (reduce #'+ (cdr (enode-term enode)) :key #'cost)))
-  :merge  (lambda (x y) (if (< y x) (values y t) (values x nil)))
-  :depends-on 'shape)
+             (reduce #'+ (enode-args enode) :key #'cost)))
+  :merge #'min)
 
 (defun resnext-block (input stride-h stride-w out-channels input-dim groups)
   (let* ((w1 (make-term (list 'weight out-channels input-dim 1 1)))
@@ -230,7 +225,7 @@
         (egraph-rebuild)
         (cost a))
 
-#+nil (let* ((*egraph* (make-egraph :analyses 'cost))
+#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
              (input (make-term (list 'input 1 3 224 224)))
              (weight (make-term (list 'weight 64 3 7 7)))
              (add (make-term (list 'ewadd input input)))
@@ -238,15 +233,15 @@
         (egraph-rebuild)
         (cost conv))
 
-#+nil (let* ((*egraph* (make-egraph :analyses 'cost))
+#+nil (let* ((*egraph* (make-egraph :analyses '(shape cost)))
              (a (resnext-50)))
         (egraph-rebuild)
         (run-rewrites *tensat-rules*)
         (graph-cost
          a
          (greedy-select (lambda (enode costs)
-                          (declare (ignore costs))
-                          (cost enode)))
+                          (when (every #'identity costs)
+                            (+ (flop-cost enode) (reduce #'+ costs)))))
          #'flop-cost))
 
 #+nil (let* ((*egraph* (make-egraph :analyses 'cost))

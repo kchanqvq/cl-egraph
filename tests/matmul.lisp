@@ -23,7 +23,7 @@
              (+ (cost x) (cost y)
                 (let ((mn (shape x)) (nk (shape y)))
                   (* (car mn) (cadr mn) (cadr nk)))))
-            ((list* 'mat _) 0)))
+            (_ 0)))
   :merge #'min)
 
 (defun make-matmul-term (dims)
