@@ -1,5 +1,15 @@
 (in-package :egraph)
 
+(declaim (inline fastlog2))
+(serapeum:eval-always
+  (defun fastlog2 (p)
+    "Compute log2(P) approximately for *positive* integer P."
+    (declare (optimize speed) (fixnum p))
+    (let* ((exponent (1- (integer-length p)))
+           (x (scale-float (coerce p 'single-float) (- exponent))))
+      (declare (type single-float x))
+      (+ exponent (- (* -0.4326728 x (- x 5.261706)) 1.8439242)))))
+
 (defun stochastic-search (term rules cost-fn
                           &key (beta 2.0) (seed 0)
                             (inf-temp-period 100) (inf-temp-iters 3)
@@ -7,6 +17,10 @@
                             (target-cost 0.0) verbose
                             (normalizer *term-normalizer*)
                             (nproc 1) max-time)
+  (declare ((or null fixnum) inf-temp-period)
+           ((or null fixnum) inf-temp-iters)
+           (single-float beta)
+           (function cost-fn))
   (let (finish
         (start-time (get-internal-real-time)))
     (flet ((search-1 (seed stride)
@@ -31,10 +45,12 @@
                             (cost init-cost)
                             (best-cost-1 cost)
                             (n-stall 0))
+                       (declare (fixnum cost n-proposal n-accepted n-restart))
                        (incf n-restart)
                        (loop for i from 0 do
                          ;; select a rewrite via reservoir sampling
-                         (let ((selected-nonce (- (log (random 1.0f0) 2)))
+                         (let ((selected-nonce (- #.(fastlog2 most-positive-fixnum)
+                                                  (fastlog2 (random most-positive-fixnum))))
                                (selected-term *term*)
                                (selected-cost cost))
                            (when (or finish
@@ -46,6 +62,7 @@
                            (dolist (rule rules)
                              (funcall rule
                                       (lambda (result)
+                                        (declare (optimize speed (safety 0)))
                                         (let* ((new-cost (funcall cost-fn result))
                                                (1/weight (if (and inf-temp-period
                                                                   inf-temp-iters
@@ -53,7 +70,10 @@
                                                                      inf-temp-iters))
                                                              1.0
                                                              (expt e^beta/2 (- new-cost cost))))
-                                               (nonce (* (- (log (random 1.0f0) 2)) 1/weight)))
+                                               (nonce (* (- #.(fastlog2 most-positive-fixnum)
+                                                            (fastlog2 (random most-positive-fixnum)))
+                                                         1/weight)))
+                                          (declare (fixnum new-cost))
                                           (incf n-proposal)
                                           (when (< nonce selected-nonce)
                                             (setq selected-nonce nonce

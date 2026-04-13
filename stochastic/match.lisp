@@ -1,7 +1,7 @@
 (in-package :egraph)
 
 (defmacro do-term ((subterm-var cont-var term cont) &body body)
-  (with-gensyms (process tail revtail result cont-1)
+  (with-gensyms (process tail revtail result cont-1 arg args)
     `(labels ((,process (,subterm-var ,cont-var)
                 ,@body
                 (do ((,tail (node-args ,subterm-var) (cdr ,tail))
@@ -10,9 +10,12 @@
                   (declare (optimize (space 0))
                            (dynamic-extent ,revtail))
                   (flet ((,cont-1 (,result)
-                           (funcall ,cont-var
-                                    (apply *term-normalizer* (node-fsym ,subterm-var)
-                                           (revappend ,revtail (cons ,result (cdr ,tail)))))))
+                           (let ((,args (cons ,result (cdr ,tail))))
+                             (declare (dynamic-extent ,args))
+                             (dolist (,arg ,revtail)
+                               (push ,arg ,args))
+                             (funcall ,cont-var
+                                      (apply *term-normalizer* (node-fsym ,subterm-var) ,args)))))
                     (declare (dynamic-extent #',cont-1))
                     (,process (car ,tail) #',cont-1))
                   (push (car ,tail) ,revtail))))
