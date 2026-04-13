@@ -112,7 +112,7 @@
                                       (search-1 (+ seed i) nproc))
                                     :name (format nil "search worker ~a" i)))
                                  (iota nproc)))
-                (best-cost 10000.0)
+                (best-cost float-features:single-float-positive-infinity)
                 best-term
                 (n-proposal 0)
                 (n-accepted 0)

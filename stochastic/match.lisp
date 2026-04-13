@@ -100,7 +100,7 @@
                     `(funcall *term-normalizer* ',(car tmpl)
                               ,@(mapcar #'process (cdr tmpl))))
                    ((var-p tmpl) tmpl)
-                   (t (process (list tmpl))))))
+                   (t `',tmpl))))
     (process tmpl)))
 
 (defun node-equal (x y)

@@ -24,10 +24,9 @@
 (defvar *term-normalizer* #'make-node)
 
 (defun make-term-1 (term)
-  (typecase term
-    (cons (apply *term-normalizer* (car term) (mapcar #'make-term-1 (cdr term))))
-    (node term)
-    (t (funcall *term-normalizer* term))))
+  (if (consp term)
+      (apply *term-normalizer* (car term) (mapcar #'make-term-1 (cdr term)))
+      term))
 
 (defstruct (rose-node (:include node) (:constructor %make-rose-node))
   (weight 0.0 :type single-float)
