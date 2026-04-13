@@ -116,7 +116,7 @@ TOP-NODE-VAR bound to the enode matching PAT."
   `(progn
      (setf (get ',name 'term-rewrite)
            (lambda (cont)
-             (declare (function cont))
+             (declare (function cont) (optimize speed (safety 0)))
              (do-term-matches* top-node cont-1 cont
                ,@(mapcar (lambda (clause)
                            (destructuring-bind
