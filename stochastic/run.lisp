@@ -47,7 +47,7 @@
                             (n-stall 0))
                        (declare (fixnum cost n-proposal n-accepted n-restart))
                        (incf n-restart)
-                       (loop for i from 0 do
+                       (loop for i of-type fixnum from 0 do
                          ;; select a rewrite via reservoir sampling
                          (let ((selected-nonce (- #.(fastlog2 most-positive-fixnum)
                                                   (fastlog2 (random most-positive-fixnum))))

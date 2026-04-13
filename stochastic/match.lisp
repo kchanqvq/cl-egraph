@@ -4,21 +4,22 @@
   (with-gensyms (process tail revtail result cont-1 arg args)
     `(labels ((,process (,subterm-var ,cont-var)
                 ,@body
-                (do ((,tail (node-args ,subterm-var) (cdr ,tail))
-                     (,revtail))
-                    ((null ,tail))
-                  (declare (optimize (space 0))
-                           (dynamic-extent ,revtail))
-                  (flet ((,cont-1 (,result)
-                           (let ((,args (cons ,result (cdr ,tail))))
-                             (declare (dynamic-extent ,args))
-                             (dolist (,arg ,revtail)
-                               (push ,arg ,args))
-                             (funcall ,cont-var
-                                      (apply *term-normalizer* (node-fsym ,subterm-var) ,args)))))
-                    (declare (dynamic-extent #',cont-1))
-                    (,process (car ,tail) #',cont-1))
-                  (push (car ,tail) ,revtail))))
+                (when (node-p ,subterm-var)
+                  (do ((,tail (node-args ,subterm-var) (cdr ,tail))
+                       (,revtail))
+                      ((null ,tail))
+                    (declare (optimize speed)
+                             (dynamic-extent ,revtail))
+                    (flet ((,cont-1 (,result)
+                             (let ((,args (cons ,result (cdr ,tail))))
+                               (declare (dynamic-extent ,args))
+                               (dolist (,arg ,revtail)
+                                 (push ,arg ,args))
+                               (funcall ,cont-var
+                                        (apply *term-normalizer* (node-fsym ,subterm-var) ,args)))))
+                      (declare (dynamic-extent #',cont-1))
+                      (,process (car ,tail) #',cont-1))
+                    (push (car ,tail) ,revtail)))))
        (,process ,term ,cont))))
 
 (defun subst-row (new old pat-row)
@@ -51,7 +52,8 @@
   (let ((groups (make-hash-table))
         (var (car var-list))
         bind-rows
-        clauses)
+        node-clauses
+        atom-clauses)
     (dolist (pat-row pat-mat)
       (let ((pat (car pat-row)))
         (cond ((consp pat)
@@ -65,16 +67,21 @@
        (let* ((sample (ensure-list (caar pat-rows)))
               (arg-vars (make-gensym-list (length (cdr sample))
                                           (prin1-to-string (car sample)))))
-         (push `((,(car sample))
-                 (destructuring-bind ,arg-vars (node-args ,var)
-                   (declare (node ,@arg-vars))
-                   ,@(expand-term-match
-                      (append arg-vars (cdr var-list))
-                      (mapcar (lambda (pat-row)
-                                (append (cdr (ensure-list (car pat-row)))
-                                        (cdr pat-row)))
-                              pat-rows))))
-               clauses)))
+         (if arg-vars
+             (push `((,(car sample))
+                     (destructuring-bind ,arg-vars (node-args ,var)
+                       ,@(expand-term-match
+                          (append arg-vars (cdr var-list))
+                          (mapcar (lambda (pat-row)
+                                    (append (cdr (ensure-list (car pat-row)))
+                                            (cdr pat-row)))
+                                  pat-rows))))
+                   node-clauses)
+             (push `((,(car sample))
+                     ,@(expand-term-match
+                        (cdr var-list)
+                        (mapcar #'cdr pat-rows)))
+                   atom-clauses))))
      groups)
     (append
      (expand-term-match
@@ -82,8 +89,10 @@
       (mapcar (lambda (pat-row)
                 (subst-row var (car pat-row) (cdr pat-row)))
               bind-rows))
-     (when clauses
-       `((case (node-fsym ,var) ,@clauses))))))
+     (when (or node-clauses atom-clauses)
+       `((if (node-p ,var)
+             (case (node-fsym ,var) ,@node-clauses)
+             (case ,var ,@atom-clauses)))))))
 
 (defun expand-term-template (tmpl)
   (labels ((process (tmpl)
@@ -95,16 +104,19 @@
     (process tmpl)))
 
 (defun node-equal (x y)
-  (unless (eql (node-fsym x) (node-fsym y))
-    (return-from node-equal nil))
-  (let ((x (node-args x))
-        (y (node-args y)))
-    (loop
-      (unless (or x y) (return))
-      (unless (node-equal (car x) (car y))
-        (return-from node-equal nil))
-      (setq x (cdr x) y (cdr y))))
-  t)
+  (cond
+    ((and (not (node-p x)) (not (node-p y))) (eql x y))
+    ((and (node-p x) (node-p y))
+     (unless (eql (node-fsym x) (node-fsym y))
+       (return-from node-equal nil))
+     (let ((x (node-args x))
+           (y (node-args y)))
+       (loop
+         (unless (or x y) (return))
+         (unless (node-equal (car x) (car y))
+           (return-from node-equal nil))
+         (setq x (cdr x) y (cdr y))))
+     t)))
 
 (defun decompose-occur-check (pat cont-expr)
   (let (vars checks)

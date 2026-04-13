@@ -3,7 +3,6 @@
 (defun make-weak-hash-cons ()
   (make-hash-table :test #'term-equal :hash-function #'term-hash :weakness :value))
 
-(declaim (type node *term*))
 (defvar *term*)
 
 (declaim (type hash-table *hash-cons*))
