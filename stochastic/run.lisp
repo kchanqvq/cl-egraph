@@ -29,7 +29,7 @@
                     (*hash-cons* (make-weak-hash-cons))
                     (init-term (make-term-1 term))
                     (init-cost (funcall cost-fn init-term))
-                    (best-term init-term)
+                    (best-term term)
                     (best-cost init-cost)
                     (e^beta/2 (exp (/ beta 2)))
                     (n-proposal 0)
@@ -88,12 +88,12 @@
                                (progn
                                  (when verbose
                                    (format t "~&Iteration ~a/~a found ~a ~a~%"
-                                           seed i cost *term*))
+                                           seed i cost (demake-term-1 *term*)))
                                  (setq best-cost-1 cost
                                        n-stall 0)
                                  (when (< cost best-cost)
                                    (setq best-cost cost
-                                         best-term *term*)
+                                         best-term (demake-term-1 *term*))
                                    (when (<= cost target-cost)
                                      (setq finish t)
                                      (return-from solve))))
@@ -103,7 +103,7 @@
                                         (< cost inf-cost))
                              (when verbose
                                (format t "~&Iteration ~a/~a restart ~a ~a~%"
-                                       seed i cost *term*))
+                                       seed i cost (demake-term-1 *term*)))
                              (return))))))))
                (values best-cost best-term n-proposal n-accepted n-restart))))
       (if (> nproc 1)

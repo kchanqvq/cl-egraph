@@ -28,6 +28,11 @@
       (apply *term-normalizer* (car term) (mapcar #'make-term-1 (cdr term)))
       term))
 
+(defun demake-term-1 (term)
+  (if (node-p term)
+      (cons (node-fsym term) (mapcar #'demake-term-1 (node-args term)))
+      term))
+
 (defstruct (rose-node (:include node) (:constructor %make-rose-node))
   (weight 0.0 :type single-float)
   (n-rewrites 0 :type fixnum))
