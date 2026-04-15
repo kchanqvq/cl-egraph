@@ -16,7 +16,7 @@
                             (max-stall 16000) (max-restart 64)
                             (target-cost 0.0) verbose
                             (normalizer *term-normalizer*)
-                            (nproc 1) max-time)
+                            (nproc 1) max-time (inf-cost 100000000))
   (declare ((or null fixnum) inf-temp-period)
            ((or null fixnum) inf-temp-iters)
            (single-float beta)
@@ -99,7 +99,8 @@
                                      (return-from solve))))
                                (incf n-stall))
                            ;; Check for restart
-                           (unless (< n-stall max-stall)
+                           (unless (and (< n-stall max-stall)
+                                        (< cost inf-cost))
                              (when verbose
                                (format t "~&Iteration ~a/~a restart ~a ~a~%"
                                        seed i cost *term*))
