@@ -103,21 +103,6 @@
                    (t `',tmpl))))
     (process tmpl)))
 
-(defun node-equal (x y)
-  (cond
-    ((and (not (node-p x)) (not (node-p y))) (eql x y))
-    ((and (node-p x) (node-p y))
-     (unless (eql (node-fsym x) (node-fsym y))
-       (return-from node-equal nil))
-     (let ((x (node-args x))
-           (y (node-args y)))
-       (loop
-         (unless (or x y) (return))
-         (unless (node-equal (car x) (car y))
-           (return-from node-equal nil))
-         (setq x (cdr x) y (cdr y))))
-     t)))
-
 (defun decompose-occur-check (pat cont-expr)
   (let (vars checks)
     (labels ((process (pat)

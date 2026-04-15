@@ -10,6 +10,9 @@
       (declare (type single-float x))
       (+ exponent (- (* -0.4326728 x (- x 5.261706)) 1.8439242)))))
 
+(defparameter *arena-size* (* 8 1024 1024))
+(defparameter *arena-collection-limit* (* 4 1024 1024))
+
 (defun stochastic-search (term rules cost-fn
                           &key (beta 2.0) (seed 0)
                             (inf-temp-period 100) (inf-temp-iters 3)
@@ -29,12 +32,13 @@
                     (*hash-cons* (make-weak-hash-cons))
                     (init-term (make-term-1 term))
                     (init-cost (funcall cost-fn init-term))
-                    (best-term init-term)
+                    (best-term term)
                     (best-cost init-cost)
                     (e^beta/2 (exp (/ beta 2)))
                     (n-proposal 0)
                     (n-accepted 0)
-                    (n-restart 0))
+                    (n-restart 0)
+                    (arena (sb-vm:new-arena *arena-size* 65536 0)))
                (float-features:with-float-traps-masked t
                  ;; Outer loop: restart with different seeds
                  (block solve
@@ -59,50 +63,56 @@
                                                 internal-time-units-per-second)
                                              max-time)))
                              (return-from solve))
-                           (dolist (rule rules)
-                             (funcall rule
-                                      (lambda (result)
-                                        (declare (optimize speed (safety 0)))
-                                        (let* ((new-cost (funcall cost-fn result))
-                                               (1/weight (if (and inf-temp-period
-                                                                  inf-temp-iters
-                                                                  (< (mod i inf-temp-period)
-                                                                     inf-temp-iters))
-                                                             1.0
-                                                             (expt e^beta/2 (- new-cost cost))))
-                                               (nonce (* (- #.(fastlog2 most-positive-fixnum)
-                                                            (fastlog2 (random most-positive-fixnum)))
-                                                         1/weight)))
-                                          (declare (fixnum new-cost))
-                                          (incf n-proposal)
-                                          (when (< nonce selected-nonce)
-                                            (setq selected-nonce nonce
-                                                  selected-term result
-                                                  selected-cost new-cost))))))
+                           (sb-vm:with-arena (arena)
+                             (dolist (rule rules)
+                               (funcall rule
+                                        (lambda (result)
+                                          (declare (optimize speed))
+                                          (let* ((new-cost (funcall cost-fn result))
+                                                 (1/weight (if (and inf-temp-period
+                                                                    inf-temp-iters
+                                                                    (< (mod i inf-temp-period)
+                                                                       inf-temp-iters))
+                                                               1.0
+                                                               (expt e^beta/2 (- new-cost cost))))
+                                                 (nonce (* (- #.(fastlog2 most-positive-fixnum)
+                                                              (fastlog2 (random most-positive-fixnum)))
+                                                           1/weight)))
+                                            (declare (fixnum new-cost))
+                                            (incf n-proposal)
+                                            (when (< nonce selected-nonce)
+                                              (setq selected-nonce nonce
+                                                    selected-term result
+                                                    selected-cost new-cost)))))))
                            (unless (eq *term* selected-term)
                              (incf n-accepted))
                            (setq *term* selected-term
                                  cost selected-cost)
+                           (unless (< (sb-vm:arena-bytes-used arena) *arena-collection-limit*)
+                             (setq *term* (copy-node-tree *term*))
+                             (sb-vm:destroy-arena arena)
+                             (setq arena (sb-vm:new-arena *arena-size* 65536 0)))
                            ;; Check for cost function decrease
                            (if (< cost best-cost-1)
                                (progn
                                  (when verbose
                                    (format t "~&Iteration ~a/~a found ~a ~a~%"
-                                           seed i cost *term*))
+                                           seed i cost (demake-term-1 *term*)))
                                  (setq best-cost-1 cost
                                        n-stall 0)
                                  (when (< cost best-cost)
                                    (setq best-cost cost
-                                         best-term *term*)
+                                         best-term (demake-term-1 *term*))
                                    (when (<= cost target-cost)
                                      (setq finish t)
                                      (return-from solve))))
                                (incf n-stall))
                            ;; Check for restart
-                           (unless (< n-stall max-stall)
+                           (unless (and (< n-stall max-stall)
+                                        (< cost 100000000))
                              (when verbose
                                (format t "~&Iteration ~a/~a restart ~a ~a~%"
-                                       seed i cost *term*))
+                                       seed i cost (demake-term-1 *term*)))
                              (return))))))))
                (values best-cost best-term n-proposal n-accepted n-restart))))
       (if (> nproc 1)
