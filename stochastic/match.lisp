@@ -1,6 +1,12 @@
 (in-package :egraph)
 
-(defmacro do-term ((subterm-var cont-var term cont) &body body)
+(defmacro klet (((name (&rest args) &body kbody)) &body body)
+  `(flet ((,name ,args ,@kbody))
+     (declare (dynamic-extent #',name))
+     ,@body))
+
+#+nil
+(defmacro do-subterm ((subterm-var cont-var term cont) &body body)
   (with-gensyms (process tail revtail result cont-1 arg args)
     `(labels ((,process (,subterm-var ,cont-var)
                 ,@body
@@ -10,14 +16,13 @@
                       ((null ,tail))
                     (declare (optimize speed)
                              (dynamic-extent ,revtail))
-                    (flet ((,cont-1 (,result)
+                    (klet ((,cont-1 (,result)
                              (let ((,args (cons ,result (cdr ,tail))))
                                (declare (dynamic-extent ,args))
                                (dolist (,arg ,revtail)
                                  (push ,arg ,args))
                                (funcall ,cont-var
                                         (apply *term-normalizer* (node-fsym ,subterm-var) ,args)))))
-                      (declare (dynamic-extent #',cont-1))
                       (,process (car ,tail) #',cont-1))
                     (push (car ,tail) ,revtail)))))
        (,process ,term ,cont))))
@@ -137,16 +142,11 @@
               `(when (and ,@checks)
                  ,cont-expr)))))
 
-(defmacro do-term-matches ((top-term-var cont-var pat cont) &body body)
-  `(do-term-matches* ,top-term-var ,cont-var ,cont
-     (,pat ,@body)))
-
-(defmacro do-term-matches* (top-term-var cont-var cont &rest clauses)
+(defmacro do-term-matches (top-term-var &rest clauses)
   (let ((pat-rows (mapcar (lambda (clause)
                             (multiple-value-list
                              (decompose-occur-check
                               (car clause)
                               `(locally ,@(cdr clause)))))
                           clauses)))
-    `(do-term (,top-term-var ,cont-var *term* ,cont)
-       ,@(expand-term-match (list top-term-var) pat-rows))))
+    `(progn ,@(expand-term-match (list top-term-var) pat-rows))))

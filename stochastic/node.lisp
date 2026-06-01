@@ -34,33 +34,54 @@
       term))
 
 (defstruct (rose-node (:include node) (:constructor %make-rose-node))
+  "N-REWRITES = -1 means the rose tree data hasn't been computed for
+ this node."
   (weight 0.0 :type single-float)
-  (n-rewrites 0 :type fixnum))
+  (n-rewrites -1 :type fixnum))
 
-(declaim (inline search-rose))
+(defmacro do-args ((arg-var with-args) args &body body)
+  "Bind ARG-VAR to successive elements of ARGS and evaluate BODY.
 
-(defun search-rose (node value accessor)
-  (labels ((process (node value)
-             (dolist (arg (node-args node))
-               (let ((a-value (funcall accessor arg)))
-                 (if (< a-value value)
-                     (decf value a-value)
-                     (return-from process (process arg value)))))
-             (return-from process (values node value))))
-    (process node value)))
+When evaluating BODY, WITH-ARGS is locally bound to a macro with syntax
+(WITH-ARGS (ARGS-VAR) NEW-ARG BODY-1...). WITH-ARGS binds ARGS-VAR to a new list
+that is the same as ARGS, except that the current element (bound to ARG-VAR) is
+replaced with NEW-ARG. ARGS-VAR can only be used during the dynamic extent of BODY-1."
+  `(do* ((tail ,args (cdr tail))
+         (,arg-var (car tail) (car tail))
+         (revtail))
+        ((null tail))
+     (macrolet ((,with-args ((args-var) new-arg &body body)
+                  `(let ((,args-var (cons ,new-arg (cdr tail))))
+                     (declare (dynamic-extent ,args-var))
+                     (dolist (arg revtail)
+                       (push arg ,args-var))
+                     ,@body)))
+       ,@body)
+     (push ,arg-var revtail)))
 
-(defun rose-normalizer (normalizer rules cost-fn e^beta/2)
-  (lambda (fsym &rest args)
-    (let* ((node (apply normalizer fsym args))
-           (cost (funcall cost-fn node))
-           (*term-normalizer* normalizer))
-      (dolist (arg args)
-        (incf (rose-node-weight node) (rose-node-weight arg)))
-      (dolist (rule rules)
-        (funcall (get rule 'term-rewrite-1) node
-                 (lambda (candidate)
-                   (incf (rose-node-n-rewrites node))
-                   (incf (rose-node-weight node)
-                         (expt e^beta/2 (- cost
-                                           (funcall cost-fn candidate)))))))
-      node)))
+(defmacro def-search-rose (name accessor type)
+  `(progn
+     (declaim (ftype (function (rose-node ,type) (values rose-node function ,type)) ,name))
+     (defun ,name (node value)
+       (labels ((process (node context value)
+                  (declare (optimize speed)
+                           (rose-node node)
+                           (function context)
+                           (,type value))
+                  (do-args (arg with-args) (node-args node)
+                    (when (rose-node-p arg)
+                      (let ((a-value (,accessor arg)))
+                        (if (<= a-value value)
+                            (decf value a-value)
+                            (return-from process
+                              (process arg
+                                       (lambda (node-1)
+                                         (with-args (args) node-1
+                                           (funcall context
+                                                    (apply *term-normalizer* (node-fsym node) args))))
+                                       value))))))
+                  (return-from process (values node context value))))
+         (process node #'identity value)))))
+
+(def-search-rose search-rose-n-rewrites rose-node-n-rewrites fixnum)
+(def-search-rose search-rose-weight rose-node-weight single-float)
