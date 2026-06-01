@@ -94,30 +94,29 @@ TOP-NODE-VAR bound to the enode matching PAT."
 
 (defmacro defrw (name lhs rhs &key (guard t))
   "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
-  `(progn
-     (defun ,name (&key match-limit)
-       (when match-limit
-         (let ((remaining match-limit))
-           (do-matches (top-node ,lhs)
-             (decf remaining)
-             (when (minusp remaining)
-               (error 'match-limit-exceeded :rule ',name :match-limit match-limit)))))
-       (do-matches (top-node ,lhs)
-         (when ,guard
-           (enode-merge top-node ,(expand-template rhs)))))
-     (setf (get ',name 'term-rewrite)
-           (lambda (top-node cont)
-             (declare (function cont) (optimize speed (safety 0)))
-             (do-term-matches top-node
-               (,lhs (when ,guard
-                       (funcall cont ,(expand-term-template rhs)))))))))
+  `(defrw* ,name (,lhs ,rhs :guard ,guard)))
 
 (defmacro defrw* (name &rest clauses)
   `(progn
+     (defun ,name (&key match-limit)
+       ,@(mapcan (lambda (clause)
+                   (destructuring-bind
+                       (lhs rhs &key (guard t)) clause
+                     `((when match-limit
+                         (let ((remaining match-limit))
+                           (do-matches (top-node ,lhs)
+                             (decf remaining)
+                             (when (minusp remaining)
+                               (error 'match-limit-exceeded :rule ',name :match-limit match-limit)))))
+                       (do-matches (top-node ,lhs)
+                         (when ,guard
+                           (enode-merge top-node ,(expand-template rhs)))))))
+                 clauses))
+
      (setf (get ',name 'term-rewrite)
            (lambda (top-node cont)
              (declare (function cont) (optimize speed (safety 0)))
-             (do-term-matches top-node
+             (do-term-matches* top-node
                ,@(mapcar (lambda (clause)
                            (destructuring-bind
                                (lhs rhs &key (guard t)) clause

@@ -142,7 +142,7 @@
               `(when (and ,@checks)
                  ,cont-expr)))))
 
-(defmacro do-term-matches (top-term-var &rest clauses)
+(defmacro do-term-matches* (top-term-var &rest clauses)
   (let ((pat-rows (mapcar (lambda (clause)
                             (multiple-value-list
                              (decompose-occur-check
