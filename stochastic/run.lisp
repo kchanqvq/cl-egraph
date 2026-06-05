@@ -55,12 +55,11 @@
 (defun stochastic-search-1
     (term rules cost-fn
      &key (finish-flag (list nil)) (seed 0) (stride 1)
-       (beta 2.0)
-       (inf-temp-period 100) (inf-temp-iters 3)
+       (beta 2.0) (inf-temp-period 100) (inf-temp-iters 3)
        (max-stall 16000) (max-restart 64)
-       (target-cost 0) verbose
-       (normalizer *term-normalizer*)
-       max-time (inf-cost 100000000))
+       (target-cost 0) max-time (inf-cost 100000000)
+       (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
+       verbose)
   (declare ((or null fixnum) inf-temp-period)
            ((or null fixnum) inf-temp-iters)
            (single-float beta))
@@ -69,6 +68,7 @@
                            (* max-time internal-time-units-per-second))))
          (rules (mapcar (alexandria:rcurry #'get 'term-rewrite) rules))
          (cost-fn (ensure-function cost-fn))
+         (proxy-cost-fn (ensure-function proxy-cost-fn))
          (beta-constant (constant-for-fastexp2 (exp (/ beta 2))))
          (*term-normalizer* (ensure-function normalizer))
          (init-term (make-term-1 term))
@@ -77,7 +77,7 @@
          (best-cost init-cost)
          (n-accepted 0)
          (n-restart 0))
-    (declare ((function (t) fixnum) cost-fn))
+    (declare ((function (t) fixnum) cost-fn proxy-cost-fn))
     (assert (every #'functionp rules))
     (float-features:with-float-traps-masked t
       ;; Outer loop: restart with different seeds
@@ -95,8 +95,12 @@
                 (when (or (car finish-flag)
                           (and end-time (>= (get-internal-real-time) end-time)))
                   (return-from solve))
-                (recompute-rose *term* rules cost-fn beta-constant)
-                (when (not (rose-node-p *term*))
+                (recompute-rose *term* rules proxy-cost-fn beta-constant)
+
+                ;; FIXME: a constant top-level *term* might still be rewritable,
+                ;; although this probably is not usually useful.
+                (when (or (not (rose-node-p *term*))
+                          (zerop (rose-node-n-rewrites *term*)))
                   (return))
 
                 (macrolet ((consider-rewrites (subject weight-var weight-form context-form)
@@ -133,17 +137,17 @@
                             (search-rose-weight *term* (random (rose-node-weight *term*)))
                           (declare (single-float weight))
                           ;; rewrites for this rose node
-                          (let ((cost-1 (funcall cost-fn subject)))
+                          (let ((cost-1 (funcall proxy-cost-fn subject)))
                             (consider-rewrites subject weight
-                                               (fastexp2 (- cost-1 (funcall cost-fn candidate))
+                                               (fastexp2 (- cost-1 (funcall proxy-cost-fn candidate))
                                                          beta-constant)
                                                (funcall context candidate)))
                           ;; rewrites for constant symbol children
                           (do-args (arg with-args) (node-args subject)
                             (unless (rose-node-p arg)
-                              (let ((cost-1 (funcall cost-fn arg)))
+                              (let ((cost-1 (funcall proxy-cost-fn arg)))
                                 (consider-rewrites arg weight
-                                                   (fastexp2 (- cost-1 (funcall cost-fn candidate))
+                                                   (fastexp2 (- cost-1 (funcall proxy-cost-fn candidate))
                                                              beta-constant)
                                                    (with-args (args) candidate
                                                      (funcall context
@@ -195,18 +199,18 @@
       (finish-output))))
 
 (defun stochastic-search (term rules cost-fn &rest args
-                          &key (beta 2.0) (seed 0) (stride 1)
-                            (inf-temp-period 100) (inf-temp-iters 3)
+                          &key (seed 0) (stride 1)
+                            (beta 2.0) (inf-temp-period 100) (inf-temp-iters 3)
                             (max-stall 16000) (max-restart 64)
-                            (target-cost 0) verbose
-                            (normalizer *term-normalizer*)
-                            max-time (inf-cost 100000000)
+                            (target-cost 0) max-time (inf-cost 100000000)
+                            (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
+                            verbose
                             (nproc 1) workers)
   (declare (ignore beta inf-temp-period inf-temp-iters
                    max-stall max-restart
-                   target-cost verbose
-                   normalizer
-                   max-time))
+                   target-cost max-time
+                   normalizer proxy-cost-fn
+                   verbose))
   (cond (workers
          (let ((n-workers (length workers)))
            (multiple-value-bind (nproc rem) (floor nproc n-workers)
@@ -250,4 +254,4 @@
         ((= nproc 0) (values (1+ inf-cost) term 0 0 0))
         (t (apply #'stochastic-search-1
                   term rules cost-fn
-                  (remove-from-plist args :nproc)))))
+                  (remove-from-plist args :nproc :workers)))))
