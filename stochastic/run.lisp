@@ -55,17 +55,18 @@
 (defun stochastic-search-1
     (term rules cost-fn
      &key (finish-flag (list nil)) (seed 0) (stride 1)
-       (beta 2.0) (inf-temp-period 100) (inf-temp-iters 3)
-       (max-stall 16000) (max-restart 64)
+       (beta 2.0) (walk-iters 3) (soft-stall 100)
+       (hard-stall 16000) (max-restart 64)
        (target-cost 0) max-time (inf-cost 100000000)
        (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
-       verbose)
-  (declare ((or null fixnum) inf-temp-period)
-           ((or null fixnum) inf-temp-iters)
+       verbose save-solution-time)
+  (declare ((or null fixnum) soft-stall max-restart)
+           (fixnum walk-iters)
            (single-float beta))
-  (let* ((end-time (and max-time
-                        (+ (get-internal-real-time)
-                           (* max-time internal-time-units-per-second))))
+  (let* ((start-time (get-internal-real-time))
+         (end-time (and max-time
+                        (+ start-time (* max-time internal-time-units-per-second))))
+         (solution-times '())
          (rules (mapcar (alexandria:rcurry #'get 'term-rewrite) rules))
          (cost-fn (ensure-function cost-fn))
          (proxy-cost-fn (ensure-function proxy-cost-fn))
@@ -86,9 +87,12 @@
           ;; Inner loop: one run of stochastic search
           (let* ((*random-state* (sb-ext:seed-random-state seed))
                  (*term* init-term)
-                 (best-cost-1 init-cost)
-                 (n-stall 0))
-            (declare (fixnum n-accepted n-restart))
+                 (best-cost-hard init-cost)
+                 (n-stall-hard 0)
+                 (best-cost-soft init-cost)
+                 (n-stall-soft 0)
+                 (n-walk walk-iters))
+            (declare (fixnum n-accepted n-restart n-stall-hard n-stall-soft n-walk))
             (incf n-restart)
             (loop for i of-type fixnum from 0 do
               (progn
@@ -114,13 +118,12 @@
                                   (funcall rule ,subject #'cont)))))
                   (declare (optimize speed))
                   (block nil
-                    (if (and inf-temp-period inf-temp-iters
-                             (< (mod i inf-temp-period)
-                                inf-temp-iters))
+                    (if (plusp n-walk)
                         ;; Inf temperature
                         (multiple-value-bind (subject context n-rewrites)
                             (search-rose-n-rewrites *term* (random (rose-node-n-rewrites *term*)))
                           (declare (fixnum n-rewrites))
+                          (decf n-walk)
                           ;; rewrites for this rose node
                           (consider-rewrites subject n-rewrites 1 (funcall context candidate))
                           ;; rewrites for constant symbol children
@@ -157,36 +160,57 @@
                 (incf n-accepted)
                 (let ((cost (funcall cost-fn *term*)))
                   ;; Check for cost function decrease
-                  (if (< cost best-cost-1)
+                  (if (< cost best-cost-hard)
                       (progn
                         (when verbose
                           (format t "~&Iteration ~a/~a found ~a ~a~%"
                                   seed i cost (demake-term-1 *term*)))
-                        (setq best-cost-1 cost
-                              n-stall 0)
+                        (setq best-cost-hard cost
+                              n-stall-hard 0)
                         (when (< cost best-cost)
                           (setq best-cost cost
                                 best-term (demake-term-1 *term*))
+                          (when save-solution-time
+                            (push (list (- (get-internal-real-time) start-time) cost)
+                                  solution-times))
                           (when (<= cost target-cost)
                             (setf (car finish-flag) t)
                             (return-from solve))))
-                      (incf n-stall))
+                      (incf n-stall-hard))
+                  (if (or (plusp n-walk) (< cost best-cost-soft))
+                      (setq best-cost-soft cost
+                            n-stall-soft 0)
+                      (incf n-stall-soft))
                   ;; Check for restart
-                  (unless (and (< n-stall max-stall)
-                               (< cost inf-cost))
+                  (when (or (and hard-stall (>= n-stall-hard hard-stall))
+                            (>= cost inf-cost))
                     (when verbose
                       (format t "~&Iteration ~a/~a restart ~a ~a~%"
                               seed i cost (demake-term-1 *term*)))
-                    (return)))))))))
-    (values best-cost best-term n-accepted n-restart)))
+                    (return))
+                  (when (and soft-stall (>= n-stall-soft soft-stall))
+                    (setq n-walk walk-iters)))))))))
+    (values best-cost best-term n-accepted n-restart (nreverse solution-times))))
 
-(defun reduce-stochastic-result (results-1 results-2)
-  (destructuring-bind (bc1 bt1 na1 nr1) results-1
-    (destructuring-bind (bc2 bt2 na2 nr2) results-2
+(defun reduce-stochastic-result (results-1 results-2 inf-cost)
+  (destructuring-bind (bc1 bt1 na1 nr1 st1) results-1
+    (destructuring-bind (bc2 bt2 na2 nr2 st2) results-2
       (append (if (< bc1 bc2)
                   (list bc1 bt1)
                   (list bc2 bt2))
-              (list (+ na1 na2) (+ nr1 nr2))))))
+              (list (+ na1 na2) (+ nr1 nr2))
+              (let ((st '())
+                    (best-cost (1+ inf-cost)))
+                (loop
+                  (when (or (not st1)
+                            (and st2 (>= (caar st1) (caar st2))))
+                    (rotatef st1 st2))
+                  (when (not st1) (return))
+                  (when (< (cadar st1) best-cost)
+                    (setq best-cost (cadar st1))
+                    (push (car st1) st))
+                  (pop st1))
+                (list (nreverse st)))))))
 
 (defun worker-loop ()
   (with-standard-io-syntax
@@ -200,17 +224,15 @@
 
 (defun stochastic-search (term rules cost-fn &rest args
                           &key (seed 0) (stride 1)
-                            (beta 2.0) (inf-temp-period 100) (inf-temp-iters 3)
-                            (max-stall 16000) (max-restart 64)
+                            (beta 2.0) (walk-iters 3) (soft-stall 100)
+                            (hard-stall 16000) (max-restart 64)
                             (target-cost 0) max-time (inf-cost 100000000)
                             (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
-                            verbose
-                            (nproc 1) workers)
-  (declare (ignore beta inf-temp-period inf-temp-iters
-                   max-stall max-restart
+                            verbose save-solution-time (nproc 1) workers)
+  (declare (ignore beta walk-iters soft-stall hard-stall max-restart
                    target-cost max-time
                    normalizer proxy-cost-fn
-                   verbose))
+                   verbose save-solution-time))
   (cond (workers
          (let ((n-workers (length workers)))
            (multiple-value-bind (nproc rem) (floor nproc n-workers)
@@ -228,7 +250,7 @@
                         (terpri (uiop:process-info-input proc))
                         (finish-output (uiop:process-info-input proc)))))
            (values-list
-            (reduce #'reduce-stochastic-result workers :key
+            (reduce (rcurry #'reduce-stochastic-result inf-cost) workers :key
                     (lambda (proc)
                       (let ((result (with-standard-io-syntax
                                       (read (uiop:process-info-output proc)))))
@@ -249,7 +271,7 @@
                                     :name (format nil "search worker ~a" i)))
                                  (iota nproc))))
            (unwind-protect
-                (values-list (reduce #'reduce-stochastic-result threads :key #'bt:join-thread))
+                (values-list (reduce (rcurry #'reduce-stochastic-result inf-cost) threads :key #'bt:join-thread))
              (setf (car finish-flag) t))))
         ((= nproc 0) (values (1+ inf-cost) term 0 0 0))
         (t (apply #'stochastic-search-1
