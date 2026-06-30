@@ -13,15 +13,16 @@
 (declaim (inline fastexp2))
 (defun constant-for-fastexp2 (base)
   (values (floor (* (expt 2 23) (log base 2)))))
-(defun fastexp2 (p base-constant)
+(defun fastexp2 (p base-constant clip)
   (declare (optimize speed (safety 0))
-           (fixnum p base-constant))
+           (fixnum p base-constant)
+           (single-float clip))
   (min (float-features:bits-single-float
         (max 0 (min #x7F800000 (+ (the fixnum (* p base-constant))
                                   (- (ash 127 23) 366393)))))
-       1e20))
+       clip))
 
-(defun recompute-rose (node rules cost-fn beta-constant)
+(defun recompute-rose (node rules cost-fn beta-constant clip)
   (declare (optimize speed (safety 0))
            ((function (t) fixnum) cost-fn))
   (labels ((process (node)
@@ -32,7 +33,7 @@
                                  (incf (rose-node-n-rewrites node))
                                  (incf (rose-node-weight node)
                                        (fastexp2 (- cost (funcall cost-fn candidate))
-                                                 beta-constant))))
+                                                 beta-constant clip))))
                           (dolist (rule rules)
                             (declare (function rule))
                             (funcall rule subject #'cont))))))
@@ -59,7 +60,7 @@
        (hard-stall 16000) (max-restart 64)
        (target-cost 0) max-time (inf-cost 100000000)
        (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
-       verbose save-solution-time)
+       mh verbose save-solution-time)
   (declare ((or null fixnum) soft-stall max-restart)
            (fixnum walk-iters)
            (single-float beta))
@@ -70,7 +71,7 @@
          (rules (mapcar (alexandria:rcurry #'get 'term-rewrite) rules))
          (cost-fn (ensure-function cost-fn))
          (proxy-cost-fn (ensure-function proxy-cost-fn))
-         (beta-constant (constant-for-fastexp2 (exp (/ beta 2))))
+         (beta-constant (constant-for-fastexp2 (if mh (exp beta) (exp (/ beta 2)))))
          (*term-normalizer* (ensure-function normalizer))
          (init-term (make-term-1 term))
          (init-cost (funcall cost-fn init-term))
@@ -99,7 +100,7 @@
                 (when (or (car finish-flag)
                           (and end-time (>= (get-internal-real-time) end-time)))
                   (return-from solve))
-                (recompute-rose *term* rules proxy-cost-fn beta-constant)
+                (recompute-rose *term* rules proxy-cost-fn beta-constant (if mh 1.0 1e20))
 
                 ;; FIXME: a constant top-level *term* might still be rewritable,
                 ;; although this probably is not usually useful.
@@ -143,7 +144,7 @@
                           (let ((cost-1 (funcall proxy-cost-fn subject)))
                             (consider-rewrites subject weight
                                                (fastexp2 (- cost-1 (funcall proxy-cost-fn candidate))
-                                                         beta-constant)
+                                                         beta-constant (if mh 1.0 1e20))
                                                (funcall context candidate)))
                           ;; rewrites for constant symbol children
                           (do-args (arg with-args) (node-args subject)
@@ -151,7 +152,7 @@
                               (let ((cost-1 (funcall proxy-cost-fn arg)))
                                 (consider-rewrites arg weight
                                                    (fastexp2 (- cost-1 (funcall proxy-cost-fn candidate))
-                                                             beta-constant)
+                                                             beta-constant (if mh 1.0 1e20))
                                                    (with-args (args) candidate
                                                      (funcall context
                                                               (apply *term-normalizer*
@@ -228,11 +229,11 @@
                             (hard-stall 16000) (max-restart 64)
                             (target-cost 0) max-time (inf-cost 100000000)
                             (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
-                            verbose save-solution-time (nproc 1) workers)
+                            verbose mh save-solution-time (nproc 1) workers)
   (declare (ignore beta walk-iters soft-stall hard-stall max-restart
                    target-cost max-time
                    normalizer proxy-cost-fn
-                   verbose save-solution-time))
+                   verbose mh save-solution-time))
   (cond (workers
          (let ((n-workers (length workers)))
            (multiple-value-bind (nproc rem) (floor nproc n-workers)
