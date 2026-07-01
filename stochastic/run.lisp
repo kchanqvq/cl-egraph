@@ -105,7 +105,7 @@
                 ;; FIXME: a constant top-level *term* might still be rewritable,
                 ;; although this probably is not usually useful.
                 (when (or (not (rose-node-p *term*))
-                          (zerop (rose-node-n-rewrites *term*)))
+                          (zerop (rose-node-weight *term*)))
                   (return))
 
                 (macrolet ((consider-rewrites (subject weight-var weight-form context-form)
