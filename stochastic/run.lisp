@@ -56,13 +56,13 @@
 (defun stochastic-search-1
     (term rules cost-fn
      &key (finish-flag (list nil)) (seed 0) (stride 1)
-       (beta 2.0) (walk-iters 3) (soft-stall 100)
-       (hard-stall 16000) (max-restart 64)
+       (beta 2.0) (soft-walk 3) (soft-stall 100)
+       (hard-stall 16000) (hard-walk 10) (max-restart 64)
        (target-cost 0) max-time (inf-cost 100000000)
        (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
        mh verbose save-solution-time)
   (declare ((or null fixnum) soft-stall max-restart)
-           (fixnum walk-iters)
+           (fixnum soft-walk hard-walk)
            (single-float beta))
   (let* ((start-time (get-internal-real-time))
          (end-time (and max-time
@@ -92,7 +92,7 @@
                  (n-stall-hard 0)
                  (best-cost-soft init-cost)
                  (n-stall-soft 0)
-                 (n-walk walk-iters))
+                 (n-walk hard-walk))
             (declare (fixnum n-accepted n-restart n-stall-hard n-stall-soft n-walk))
             (incf n-restart)
             (loop for i of-type fixnum from 0 do
@@ -190,7 +190,7 @@
                               seed i cost (demake-term-1 *term*)))
                     (return))
                   (when (and soft-stall (>= n-stall-soft soft-stall))
-                    (setq n-walk walk-iters)))))))))
+                    (setq n-walk soft-walk)))))))))
     (values best-cost best-term n-accepted n-restart (nreverse solution-times))))
 
 (defun reduce-stochastic-result (results-1 results-2 inf-cost)
@@ -225,12 +225,12 @@
 
 (defun stochastic-search (term rules cost-fn &rest args
                           &key (seed 0) (stride 1)
-                            (beta 2.0) (walk-iters 3) (soft-stall 100)
-                            (hard-stall 16000) (max-restart 64)
+                            (beta 2.0) (soft-walk 3) (soft-stall 100)
+                            (hard-walk 10) (hard-stall 16000) (max-restart 64)
                             (target-cost 0) max-time (inf-cost 100000000)
                             (normalizer *term-normalizer*) (proxy-cost-fn cost-fn)
                             verbose mh save-solution-time (nproc 1) workers)
-  (declare (ignore beta walk-iters soft-stall hard-stall max-restart
+  (declare (ignore beta soft-walk soft-stall hard-walk hard-stall max-restart
                    target-cost max-time
                    normalizer proxy-cost-fn
                    verbose mh save-solution-time))
