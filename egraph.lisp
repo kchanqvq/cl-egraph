@@ -2,7 +2,7 @@
 
 (declaim (inline enode-representative-p enode-canonical-p enode-eclass-info
                  make-analysis-data merge-analysis-data modify-analysis-data
-                 get-analysis-data egraph-n-enodes egraph-n-eclasses dfs))
+                 get-analysis-data egraph-n-enodes egraph-n-eclasses))
 
 (defstruct (eclass-info (:constructor %make-eclass-info))
   "Metadata for the eclass.
@@ -15,19 +15,7 @@ NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
   (n-parents 0 :type fixnum)
   (analysis-data-vec (vector) :type simple-vector))
 
-(declaim (type non-negative-fixnum *hash-code*))
-(global-vars:define-global-var *hash-code* 0)
-
-(defstruct (node (:constructor %make-node))
-  (fsym) (args))
-
-(defstruct (hash-node (:include node) (:constructor %make-hash-node))
-  (hash-code
-   (setf *hash-code*
-         (logand (1+ *hash-code*) most-positive-fixnum))
-   :type fixnum))
-
-(defstruct (enode (:include hash-node) (:constructor %make-enode))
+(defstruct (enode (:constructor %make-enode))
   "PARENT is either another enode in the same eclass, or an `eclass-info' if this
 enode is the representative of its own eclass.
 
@@ -35,7 +23,9 @@ Set CANONICAL-FLAG to NIL to mark the node as non-canonical. `egraph-rebuild'
 trusts this information to avoid testing all term arguments for
 representativeness."
   (parent)
-  (canonical-flag t :type boolean))
+  (canonical-flag t :type boolean)
+  (hash-code 0 :type fixnum)
+  (fsym) (args))
 
 ;; Be aware that representative enode might be non-canonical!
 (defun enode-representative-p (enode)
@@ -53,10 +43,10 @@ representativeness."
             (cons (enode-fsym self) (enode-args self)))))
 
 (defun term-equal (x y)
-  (unless (eql (node-fsym x) (node-fsym y))
+  (unless (eql (enode-fsym x) (enode-fsym y))
     (return-from term-equal nil))
-  (let ((x (node-args x))
-        (y (node-args y)))
+  (let ((x (enode-args x))
+        (y (enode-args y)))
     (loop
       (unless (or x y) (return))
       (unless (eq (car x) (car y))
@@ -64,19 +54,20 @@ representativeness."
       (setq x (cdr x) y (cdr y))))
   t)
 
-(defun term-hash (x)
-  (let ((hash (sxhash (node-fsym x)))
+(declaim (inline term-hash))
+(defun term-hash (fsym args)
+  (let ((hash (sxhash fsym))
         (mul (logand 3622009729038463111 most-positive-fixnum))
         (xor (logand 608948948376289905 most-positive-fixnum)))
     (declare (type non-negative-fixnum hash))
-    (dolist (i (node-args x))
+    (dolist (i args)
       ;; Copied sb-c::mix
-      (setq hash (logand (+ hash (* (hash-node-hash-code i) mul)) most-positive-fixnum))
+      (setq hash (logand (+ hash (* (enode-hash-code i) mul)) most-positive-fixnum))
       (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     hash))
 
 (cl-custom-hash-table:define-custom-hash-table-constructor make-hash-cons
-  :test term-equal :hash-function term-hash)
+  :test term-equal :hash-function enode-hash-code)
 
 (defstruct fsym-info
   "Index data for specific function symbol.
@@ -176,12 +167,13 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (declare (optimize speed (space 0))
            (dynamic-extent args))
   (let* ((args (mapcar #'enode-find args))
-         (key-node (%make-node :fsym fsym :args args)))
+         (hash (term-hash fsym args))
+         (key-node (%make-enode :hash-code hash :fsym fsym :args args)))
     (declare (dynamic-extent key-node))
     (or (gethash key-node (egraph-hash-cons *egraph*))
         (lret ((data-vec (make-array (length (egraph-analysis-info-list *egraph*))
                                      :initial-element 'unbound))
-               (enode (%make-enode :fsym fsym :args args)))
+               (enode (%make-enode :hash-code hash :fsym fsym :args args)))
           (setf (enode-parent enode)
                 (%make-eclass-info :nodes (list enode) :analysis-data-vec data-vec))
           (dolist (arg args)
@@ -189,8 +181,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
             (incf (eclass-info-n-parents (enode-parent arg))))
           (setf (gethash enode (egraph-hash-cons *egraph*)) enode)
           (make-analysis-data data-vec enode)
-          (modify-analysis-data enode)
-          enode))))
+          (modify-analysis-data enode)))))
 
 (-> enode-merge (enode enode) null)
 (defun enode-merge (x y)
