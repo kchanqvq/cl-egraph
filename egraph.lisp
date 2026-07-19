@@ -1,7 +1,8 @@
 (in-package :egraph)
 
 (declaim (inline enode-representative-p enode-canonical-p enode-eclass-info
-                 enode-n-args make-analysis-data merge-analysis-data modify-analysis-data
+                 enode-n-args enode-arg
+                 make-analysis-data merge-analysis-data modify-analysis-data
                  get-analysis-data egraph-n-enodes egraph-n-eclasses))
 
 (defstruct (eclass-info (:constructor %make-eclass-info))
@@ -33,25 +34,32 @@ representativeness."
   (cond ((eq n '*) 'simple-vector)
         (t `(simple-vector ,(+ n +enode-args-offset+)))))
 
-(defmacro do-enode-args ((arg-var enode-var) &body body)
+(defmacro do-enode-args ((arg-var enode-var &optional result) &body body)
   (once-only (enode-var)
     (with-gensyms (i)
       `(loop for ,i from +enode-args-offset+ below (length ,enode-var)
-             for ,arg-var = (svref ,enode-var ,i)
-             do (progn ,@body)))))
+             do (symbol-macrolet ((,arg-var (svref ,enode-var ,i)))
+                  ,@body)
+             finally (return ,result)))))
+
+(defun map-enode-args (function enode)
+  (collecting
+    (do-enode-args (arg enode)
+      (collect (funcall function arg)))))
 
 (defun enode-n-args (enode)
   (- (length enode) +enode-args-offset+))
+
+(defun enode-arg (i enode)
+  (svref enode (+ i +enode-args-offset+)))
 
 ;; Be aware that representative enode might be non-canonical!
 (defun enode-representative-p (enode)
   (eclass-info-p (enode-parent enode)))
 
-(defun enode-args (enode)
-  (collecting (do-enode-args (arg enode) (collect arg))))
-
 (defun enode-canonical-p (enode)
-  (every #'enode-representative-p (enode-args enode)))
+  (do-enode-args (arg enode t)
+    (unless (enode-representative-p arg) (return))))
 
 (defun enode-eclass-info (enode)
   (enode-parent (enode-find enode)))
@@ -174,8 +182,8 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
 
 (-> intern-enode (enode) enode)
 (defun intern-enode (key-node)
-  (loop for i from +enode-args-offset+ below (length key-node)
-        do (setf (svref key-node i) (enode-find (svref key-node i))))
+  (do-enode-args (arg key-node)
+    (setq arg (enode-find arg)))
   (let ((hash (term-hash key-node)))
     (setf (enode-hash-code key-node) hash)
     (or (gethash key-node (egraph-hash-cons *egraph*))
@@ -301,7 +309,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
       (let ((nodes (list-enodes class)))
         (dolist (node nodes)
           (if (enode-canonical-p node)
-              (dolist (arg (enode-args node))
+              (do-enode-args (arg node)
                 (unless (member node (eclass-info-parents (enode-parent arg)))
                   (error "Missing parent link from ~a to ~a" arg node)))
               (error "Non canonical node ~a on ~a's node list" node class)))
@@ -312,7 +320,8 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
         (dolist (node parents)
           (unless (enode-canonical-p node)
             (error "Non canonical ~a on ~a's parent list" node class))
-          (unless (member class (enode-args node))
+          (unless (do-enode-args (arg node)
+                    (when (eq class arg) (return t)))
             (error "Extra parent link from ~a to ~a" class node)))
         ;; Currently we allow duplicates in parent list
         (incf n-parent-list (length parents))

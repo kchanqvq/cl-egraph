@@ -11,19 +11,21 @@
 
 (define-analysis shape
   :make (lambda (enode)
-          (trivia:match (cons (enode-fsym enode) (enode-args enode))
-            ((list 'matmul x y) (list (car (shape x)) (cadr (shape y))))
-            ((list* 'mat args) (mapcar #'enode-fsym args))))
+          (case (enode-fsym enode)
+            (matmul (list (car (shape (enode-arg 0 enode))) (cadr (shape (enode-arg 1 enode)))))
+            (mat (map-enode-args #'enode-fsym enode))))
   :merge (make-orp #'equal))
 
 (define-analysis cost
   :make (lambda (enode)
-          (trivia:match (cons (enode-fsym enode) (enode-args enode))
-            ((list 'matmul x y)
-             (+ (cost x) (cost y)
-                (let ((mn (shape x)) (nk (shape y)))
-                  (* (car mn) (cadr mn) (cadr nk)))))
-            (_ 0)))
+          (case (enode-fsym enode)
+            (matmul
+             (let ((x (enode-arg 0 enode))
+                   (y (enode-arg 1 enode)))
+               (+ (cost x) (cost y)
+                  (let ((mn (shape x)) (nk (shape y)))
+                    (* (car mn) (cadr mn) (cadr nk))))))
+            (t 0)))
   :merge #'min)
 
 (defun make-matmul-term (dims)
