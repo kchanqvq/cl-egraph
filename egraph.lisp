@@ -58,29 +58,22 @@ Set CANONICAL-FLAG to NIL to mark the node as non-canonical. `egraph-rebuild'
 trusts this information to avoid testing all term arguments for
 representativeness."
   (parent)
-  (canonical-flag t :type boolean)
+  (flags 3 :type fixnum)
   (hash-code 0 :type fixnum)
   (fsym)
   (arg))
 
-(declaim (inline eclass-info-p
-                 enode-representative-p enode-canonical-p enode-eclass-info
-                 make-analysis-data merge-analysis-data modify-analysis-data
-                 get-analysis-data egraph-n-enodes egraph-n-eclasses))
-
-(defun eclass-info-p (vec)
-  (typep (svref vec 0) 'fixnum))
+(defmacro enode-canonical-flag (enode)
+  `(ldb (byte 1 0) (enode-flags ,enode)))
 
 ;; Be aware that representative enode might be non-canonical!
-(defun enode-representative-p (enode)
-  (eclass-info-p (enode-parent enode)))
+(defmacro enode-representative-flag (enode)
+  `(ldb (byte 1 1) (enode-flags ,enode)))
 
 (defun enode-canonical-p (enode)
+  "This doesn't trust CANONICAL-FLAG, for sanity check."
   (do-enode-args (arg enode t)
-    (unless (enode-representative-p arg) (return))))
-
-(defun enode-eclass-info (enode)
-  (enode-parent (enode-find enode)))
+    (unless (plusp (enode-representative-flag arg)) (return))))
 
 (defun term-equal (x y)
   (declare (optimize speed (safety 0)))
@@ -104,6 +97,13 @@ representativeness."
 
 (cl-custom-hash-table:define-custom-hash-table-constructor make-hash-cons
   :test term-equal :hash-function enode-hash-code)
+
+(declaim (inline enode-eclass-info
+                 make-analysis-data merge-analysis-data modify-analysis-data
+                 get-analysis-data egraph-n-enodes egraph-n-eclasses))
+
+(defun enode-eclass-info (enode)
+  (enode-parent (enode-find enode)))
 
 (defstruct fsym-info
   "Index data for specific function symbol.
@@ -153,13 +153,13 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
 
 (-> enode-find (enode) enode)
 (defun enode-find (enode)
-  (let ((parent (enode-parent enode)))
-    (if (eclass-info-p parent)
-        enode
+  (if (plusp (enode-representative-flag enode))
+      enode
+      (let ((parent (enode-parent enode)))
         (loop
+          (when (plusp (enode-representative-flag parent))
+            (return parent))
           (let ((grandparent (enode-parent parent)))
-            (when (eclass-info-p grandparent)
-              (return parent))
             (psetf (enode-parent enode) grandparent
                    parent grandparent
                    enode parent))))))
@@ -218,7 +218,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
           (modify-analysis-data enode)))))
 
 (defun make-enode (fsym &rest args)
-  (let ((key-node (apply #'vector nil t 0 fsym args)))
+  (let ((key-node (apply #'vector nil 3 0 fsym args)))
     (declare (dynamic-extent key-node))
     (intern-enode key-node)))
 
@@ -234,11 +234,12 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
           (rotatef x y)
           (rotatef px py))
         (dolist (parent (eclass-info-parents py))
-          (setf (enode-canonical-flag parent) nil)
+          (setf (enode-canonical-flag parent) 0)
           (push parent (egraph-work-list *egraph*)))
         (setf (eclass-info-nodes px)
               (nreconc (eclass-info-nodes py) (eclass-info-nodes px))
-              (enode-parent y) x)
+              (enode-parent y) x
+              (enode-representative-flag y) 0)
         (merge-analysis-data x py)
         (modify-analysis-data x)
         nil))))
@@ -257,17 +258,17 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
        (let ((key-node (copy-seq enode)))
          (declare (dynamic-extent key-node))
          (setf (enode-parent key-node) nil
-               (enode-canonical-flag key-node) t)
+               (enode-flags key-node) 3)
          (intern-enode key-node))
        enode)))
   ;; Update analysis
   (loop
     (let ((enode (pop (egraph-analysis-work-list *egraph*))))
       (unless enode (return))
-      (let ((info (enode-parent enode)))
-        (when (eclass-info-p info)
+      (when (plusp (enode-representative-flag enode))
+        (let ((info (enode-parent enode)))
           (dolist (parent (eclass-info-parents info))
-            (when (enode-canonical-flag parent)
+            (when (plusp (enode-canonical-flag parent))
               (let ((new-class-info (make-array (+ +eclass-info-data-offset+
                                                    (length (egraph-analysis-info-list *egraph*)))
                                                 :initial-element 'unbound))
@@ -280,7 +281,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
   ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
   ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
-  ;; `enode-representative-p'.
+  ;; `enode-representative-flag'.
   (clrhash (egraph-classes *egraph*))
   (maphash-values (lambda (node)
                     (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
@@ -290,9 +291,9 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
   (maphash-keys (lambda (class)
                   (let ((info (enode-parent class)))
                     (setf (eclass-info-nodes info)
-                          (delete-if-not #'enode-canonical-flag (eclass-info-nodes info))
+                          (delete-if-not (lambda (n) (plusp (enode-canonical-flag n))) (eclass-info-nodes info))
                           (eclass-info-parents info)
-                          (delete-if-not #'enode-canonical-flag (eclass-info-parents info))
+                          (delete-if-not (lambda (n) (plusp (enode-canonical-flag n))) (eclass-info-parents info))
                           (eclass-info-n-parents info)
                           (length (eclass-info-parents info)))
                     (dolist (node (eclass-info-nodes info))

@@ -59,7 +59,7 @@ evaluate CONT-EXPR."
   "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
   (labels ((process (tmpl)
              (cond ((consp tmpl)
-                    `(let ((key-node (vector nil t 0 ',(car tmpl) ,@(mapcar #'process (cdr tmpl)))))
+                    `(let ((key-node (vector nil 3 0 ',(car tmpl) ,@(mapcar #'process (cdr tmpl)))))
                        (declare (dynamic-extent key-node))
                        (intern-enode key-node)))
                    ((var-p tmpl) tmpl)
