@@ -1,6 +1,6 @@
 (uiop:define-package :egraph
     (:use #:cl #:alexandria)
-  (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p #:collecting)
+  (:import-from #:serapeum #:lret #:lret* #:-> #:string-prefix-p #:with-collector)
   (:import-from #:bind #:bind)
   (:export #:make-enode #:enode-fsym #:enode-arg #:enode-n-args
            #:do-enode-args #:map-enode-args #:make-egraph #:list-enodes
