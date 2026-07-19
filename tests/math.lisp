@@ -1,6 +1,7 @@
 (uiop:define-package :egraph/tests/math
     (:use #:cl #:egraph #:alexandria)
-  (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
+  (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite)
+  (:import-from #:serapeum #:collecting))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname
@@ -13,12 +14,11 @@
 (define-analysis const
   :make (lambda (enode)
           (let ((fsym (enode-fsym enode)))
-            (if-let (args (enode-args enode))
-                (block nil
-                  (let ((args (mapcar (lambda (enode)
-                                        (or (const enode)
-                                            (return)))
-                                      args)))
+            (if (plusp (enode-n-args enode))
+                (block const
+                  (let ((args (collecting
+                                (do-enode-args (arg enode)
+                                  (collect (or (const arg) (return-from const)))))))
                     ;; Guard against things like division by zero
                     (ignore-errors
                      (let* ((result (apply fsym args)))
@@ -32,15 +32,14 @@
   :merge (make-orp #'=)
   :modify (lambda (node data)
             (when data
-              (let ((const (make-enode data)))
+              (let* ((const (make-enode data)))
                 (enode-merge node const)
                 (setf (egraph::eclass-info-nodes (enode-eclass-info node))
                       (list const))))))
 
 (define-analysis var
   :make (lambda (enode)
-          (when (and (null (enode-args enode))
-                     (symbolp (enode-fsym enode)))
+          (when (and (zerop (enode-n-args enode)) (symbolp (enode-fsym enode)))
             (enode-fsym enode)))
   :merge (make-orp #'eq))
 

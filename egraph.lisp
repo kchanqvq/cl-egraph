@@ -1,7 +1,7 @@
 (in-package :egraph)
 
 (declaim (inline enode-representative-p enode-canonical-p enode-eclass-info
-                 make-analysis-data merge-analysis-data modify-analysis-data
+                 enode-n-args make-analysis-data merge-analysis-data modify-analysis-data
                  get-analysis-data egraph-n-enodes egraph-n-eclasses))
 
 (defstruct (eclass-info (:constructor %make-eclass-info))
@@ -15,7 +15,7 @@ NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
   (n-parents 0 :type fixnum)
   (analysis-data-vec (vector) :type simple-vector))
 
-(defstruct (enode (:constructor %make-enode))
+(defstruct (enode (:type vector) (:constructor nil))
   "PARENT is either another enode in the same eclass, or an `eclass-info' if this
 enode is the representative of its own eclass.
 
@@ -25,11 +25,30 @@ representativeness."
   (parent)
   (canonical-flag t :type boolean)
   (hash-code 0 :type fixnum)
-  (fsym) (args))
+  (fsym))
+
+(defconstant +enode-args-offset+ 4)
+
+(deftype enode (&optional n)
+  (cond ((eq n '*) 'simple-vector)
+        (t `(simple-vector ,(+ n +enode-args-offset+)))))
+
+(defmacro do-enode-args ((arg-var enode-var) &body body)
+  (once-only (enode-var)
+    (with-gensyms (i)
+      `(loop for ,i from +enode-args-offset+ below (length ,enode-var)
+             for ,arg-var = (svref ,enode-var ,i)
+             do (progn ,@body)))))
+
+(defun enode-n-args (enode)
+  (- (length enode) +enode-args-offset+))
 
 ;; Be aware that representative enode might be non-canonical!
 (defun enode-representative-p (enode)
   (eclass-info-p (enode-parent enode)))
+
+(defun enode-args (enode)
+  (collecting (do-enode-args (arg enode) (collect arg))))
 
 (defun enode-canonical-p (enode)
   (every #'enode-representative-p (enode-args enode)))
@@ -37,32 +56,23 @@ representativeness."
 (defun enode-eclass-info (enode)
   (enode-parent (enode-find enode)))
 
-(defmethod print-object ((self enode) stream)
-  (print-unreadable-object (self stream :type t :identity t)
-    (format stream "~:[~;REP ~]~a" (enode-representative-p self)
-            (cons (enode-fsym self) (enode-args self)))))
-
 (defun term-equal (x y)
-  (unless (eql (enode-fsym x) (enode-fsym y))
+  (declare (optimize speed (safety 0)))
+  (unless (and (eql (enode-fsym x) (enode-fsym y))
+               (= (length x) (length y)))
     (return-from term-equal nil))
-  (let ((x (enode-args x))
-        (y (enode-args y)))
-    (loop
-      (unless (or x y) (return))
-      (unless (eq (car x) (car y))
-        (return-from term-equal nil))
-      (setq x (cdr x) y (cdr y))))
-  t)
+  (loop for i from +enode-args-offset+ below (length x)
+        always (eq (svref x i) (svref y i))))
 
 (declaim (inline term-hash))
-(defun term-hash (fsym args)
-  (let ((hash (sxhash fsym))
+(defun term-hash (x)
+  (declare (optimize speed (safety 0)))
+  (let ((hash (sxhash (enode-fsym x)))
         (mul (logand 3622009729038463111 most-positive-fixnum))
         (xor (logand 608948948376289905 most-positive-fixnum)))
     (declare (type non-negative-fixnum hash))
-    (dolist (i args)
-      ;; Copied sb-c::mix
-      (setq hash (logand (+ hash (* (enode-hash-code i) mul)) most-positive-fixnum))
+    (do-enode-args (arg x)
+      (setq hash (logand (+ hash (* (enode-hash-code arg) mul)) most-positive-fixnum))
       (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     hash))
 
@@ -162,26 +172,29 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
          (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
              (error "Analysis ~a missing from egraph." name))))
 
-(-> make-enode (t &rest t) enode)
-(defun make-enode (fsym &rest args)
-  (declare (optimize speed (space 0))
-           (dynamic-extent args))
-  (let* ((args (mapcar #'enode-find args))
-         (hash (term-hash fsym args))
-         (key-node (%make-enode :hash-code hash :fsym fsym :args args)))
-    (declare (dynamic-extent key-node))
+(-> intern-enode (enode) enode)
+(defun intern-enode (key-node)
+  (loop for i from +enode-args-offset+ below (length key-node)
+        do (setf (svref key-node i) (enode-find (svref key-node i))))
+  (let ((hash (term-hash key-node)))
+    (setf (enode-hash-code key-node) hash)
     (or (gethash key-node (egraph-hash-cons *egraph*))
         (lret ((data-vec (make-array (length (egraph-analysis-info-list *egraph*))
                                      :initial-element 'unbound))
-               (enode (%make-enode :hash-code hash :fsym fsym :args args)))
+               (enode (copy-seq key-node)))
           (setf (enode-parent enode)
                 (%make-eclass-info :nodes (list enode) :analysis-data-vec data-vec))
-          (dolist (arg args)
+          (do-enode-args (arg enode)
             (push enode (eclass-info-parents (enode-parent arg)))
             (incf (eclass-info-n-parents (enode-parent arg))))
           (setf (gethash enode (egraph-hash-cons *egraph*)) enode)
           (make-analysis-data data-vec enode)
           (modify-analysis-data enode)))))
+
+(defun make-enode (fsym &rest args)
+  (let ((key-node (apply #'vector nil t 0 fsym args)))
+    (declare (dynamic-extent key-node))
+    (intern-enode key-node)))
 
 (-> enode-merge (enode enode) null)
 (defun enode-merge (x y)
@@ -214,7 +227,13 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
     (let ((enode (pop (egraph-work-list *egraph*))))
       (unless enode (return))
       (remhash enode (egraph-hash-cons *egraph*))
-      (enode-merge (apply #'make-enode (enode-fsym enode) (enode-args enode)) enode)))
+      (enode-merge
+       (let ((key-node (copy-seq enode)))
+         (declare (dynamic-extent key-node))
+         (setf (enode-parent key-node) nil
+               (enode-canonical-flag key-node) t)
+         (intern-enode key-node))
+       enode)))
   ;; Update analysis
   (loop
     (let ((enode (pop (egraph-analysis-work-list *egraph*))))
