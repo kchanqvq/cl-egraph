@@ -6,7 +6,7 @@
   :depends-on (:alexandria
                :serapeum
                :metabang-bind
-               :cl-custom-hash-table
+               :lp-hash-table
                :global-vars
                :trivial-garbage
                :trivial-package-local-nicknames
