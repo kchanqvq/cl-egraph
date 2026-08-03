@@ -44,7 +44,9 @@ evaluate CONT-EXPR."
         `(dolist (,node-var ,(if lhs-bound-p
                                  `(gethash ,var (fsym-info-node-table ,fsym-info-var))
                                  `(fsym-info-nodes ,fsym-info-var)))
-           (destructuring-bind ,lisp-arg-vars (enode-args ,node-var)
+           (let ,(mapcar (lambda (lisp-arg-var i)
+                           `(,lisp-arg-var (svref ,node-var ,i)))
+                  lisp-arg-vars (iota (length lisp-arg-vars) :start +enode-args-offset+))
              (declare (ignorable ,@lisp-arg-vars))
              (when (and ,@ (mapcan (lambda (lisp-var var)
                                      (when (and (var-p var) (not (var-p lisp-var)))
@@ -57,7 +59,9 @@ evaluate CONT-EXPR."
   "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
   (labels ((process (tmpl)
              (cond ((consp tmpl)
-                    `(make-enode ',(car tmpl) ,@(mapcar #'process (cdr tmpl))))
+                    `(let ((key-node (vector nil 3 0 ',(car tmpl) ,@(mapcar #'process (cdr tmpl)))))
+                       (declare (dynamic-extent key-node))
+                       (intern-enode key-node)))
                    ((var-p tmpl) tmpl)
                    (t (process (list tmpl))))))
     (process tmpl)))
