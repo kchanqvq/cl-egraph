@@ -102,7 +102,7 @@ TOP-NODE-VAR bound to the enode matching PAT."
 
 (defmacro defrw* (name &rest clauses)
   `(progn
-     (defun ,name (&key match-limit)
+     #+nil (defun ,name (&key match-limit)
        ,@(mapcan (lambda (clause)
                    (destructuring-bind
                        (lhs rhs &key (guard t)) clause

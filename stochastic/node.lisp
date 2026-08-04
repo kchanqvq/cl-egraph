@@ -1,63 +1,32 @@
 (in-package :egraph)
 
-(defun make-weak-hash-cons ()
-  (make-hash-table :test #'term-equal :hash-function #'term-hash :weakness :value))
-
-(defvar *term*)
-
-(declaim (type hash-table *hash-cons*))
-(defvar *hash-cons*)
-
-(declaim (inline make-node make-hash-node))
-
-(defun make-node (fsym &rest args)
-  (%make-node :fsym fsym :args args))
-
-(defun make-hash-node (fsym &rest args)
-  (let ((node (%make-node :fsym fsym :args args)))
-    (declare (dynamic-extent node))
-    (or (gethash node *hash-cons*)
-        (let ((node (%make-hash-node :fsym fsym :args args)))
-          (setf (gethash node *hash-cons*) node)))))
-
-(declaim (type function *term-normalizer*))
-(defvar *term-normalizer* #'make-node)
-
-(defun make-term-1 (term)
-  (if (consp term)
-      (apply *term-normalizer* (car term) (mapcar #'make-term-1 (cdr term)))
-      term))
-
-(defun demake-term-1 (term)
-  (if (node-p term)
-      (cons (node-fsym term) (mapcar #'demake-term-1 (node-args term)))
-      term))
-
-(defstruct (rose-node (:include node) (:constructor %make-rose-node))
+(define-variadic-structure rose-node
   "N-REWRITES = -1 means the rose tree data hasn't been computed for
  this node."
   (weight 0.0 :type single-float)
-  (n-rewrites -1 :type fixnum))
+  (n-rewrites -1 :type fixnum)
+  (cost 1 :type fixnum)
+  (fsym)
+  (arg))
 
-(defmacro do-args ((arg-var with-args) args &body body)
-  "Bind ARG-VAR to successive elements of ARGS and evaluate BODY.
+(defvar *term*)
 
-When evaluating BODY, WITH-ARGS is locally bound to a macro with syntax
-(WITH-ARGS (ARGS-VAR) NEW-ARG BODY-1...). WITH-ARGS binds ARGS-VAR to a new list
-that is the same as ARGS, except that the current element (bound to ARG-VAR) is
-replaced with NEW-ARG. ARGS-VAR can only be used during the dynamic extent of BODY-1."
-  `(do* ((tail ,args (cdr tail))
-         (,arg-var (car tail) (car tail))
-         (revtail))
-        ((null tail))
-     (macrolet ((,with-args ((args-var) new-arg &body body)
-                  `(let ((,args-var (cons ,new-arg (cdr tail))))
-                     (declare (dynamic-extent ,args-var))
-                     (dolist (arg revtail)
-                       (push arg ,args-var))
-                     ,@body)))
-       ,@body)
-     (push ,arg-var revtail)))
+(declaim (inline make-node))
+
+(declaim (type function *term-normalizer*))
+(defvar *term-normalizer* #'identity)
+
+(defun make-term-1 (term)
+  (if (consp term)
+      (funcall *term-normalizer*
+               (apply #'vector 0.0 -1 1 (car term) (mapcar #'make-term-1 (cdr term))))
+      term))
+
+(defun demake-term-1 (term)
+  (if (vectorp term)
+      (cons (rose-node-fsym term)
+            (map-rose-node-args #'demake-term-1 term))
+      term))
 
 (defmacro def-search-rose (name accessor type)
   `(progn
@@ -68,17 +37,20 @@ replaced with NEW-ARG. ARGS-VAR can only be used during the dynamic extent of BO
                            (rose-node node)
                            (function context)
                            (,type value))
-                  (do-args (arg with-args) (node-args node)
-                    (when (rose-node-p arg)
+                  (do-rose-node-args ((arg i) node)
+                    (when (vectorp arg)
                       (let ((a-value (,accessor arg)))
                         (if (<= a-value value)
                             (decf value a-value)
                             (return-from process
                               (process arg
                                        (lambda (node-1)
-                                         (with-args (args) node-1
-                                           (funcall context
-                                                    (apply *term-normalizer* (node-fsym node) args))))
+                                         (let ((new-node (copy-seq node)))
+                                           (setf (rose-node-weight new-node) 0.0
+                                                 (rose-node-n-rewrites new-node) -1
+                                                 (rose-node-cost new-node) 1
+                                                 (rose-node-arg i new-node) node-1)
+                                           (funcall context (funcall *term-normalizer* new-node))))
                                        value))))))
                   (return-from process (values node context value))))
          (process node #'identity value)))))

@@ -37,8 +37,8 @@
                             (declare (function rule))
                             (funcall rule subject #'cont))))))
                (setf (rose-node-n-rewrites node) 0)
-               (dolist (arg (node-args node))
-                 (if (rose-node-p arg)
+               (do-rose-node-args (arg node)
+                 (if (vectorp arg)
                      (progn
                        (when (minusp (rose-node-n-rewrites arg))
                          (process arg))
@@ -48,7 +48,7 @@
                      ;; are counted together
                      (consider-rewrites arg)))
                (consider-rewrites node))))
-    (when (rose-node-p node)
+    (when (vectorp node)
       (when (minusp (rose-node-n-rewrites node))
         (process node)))))
 
@@ -99,7 +99,7 @@
 
                 ;; FIXME: a constant top-level *term* might still be rewritable,
                 ;; although this probably is not usually useful.
-                (when (or (not (rose-node-p *term*))
+                (when (or (not (vectorp *term*))
                           (zerop (rose-node-n-rewrites *term*)))
                   (return))
 
@@ -124,14 +124,15 @@
                           ;; rewrites for this rose node
                           (consider-rewrites subject n-rewrites 1 (funcall context candidate))
                           ;; rewrites for constant symbol children
-                          (do-args (arg with-args) (node-args subject)
-                            (unless (rose-node-p arg)
+                          (do-rose-node-args ((arg i) subject)
+                            (unless (vectorp arg)
                               (consider-rewrites arg n-rewrites 1
-                                                 (with-args (args) candidate
-                                                   (funcall context
-                                                            (apply *term-normalizer*
-                                                                   (node-fsym subject)
-                                                                   args)))))))
+                                                 (let ((new-node (copy-seq subject)))
+                                                   (setf (rose-node-weight new-node) 0.0
+                                                         (rose-node-n-rewrites new-node) -1
+                                                         (rose-node-cost new-node) 1
+                                                         (rose-node-arg i new-node) candidate)
+                                                   (funcall context (funcall *term-normalizer* new-node)))))))
                         ;; Finite temperature
                         (multiple-value-bind (subject context weight)
                             (search-rose-weight *term* (random (rose-node-weight *term*)))
@@ -143,17 +144,18 @@
                                                          beta-constant)
                                                (funcall context candidate)))
                           ;; rewrites for constant symbol children
-                          (do-args (arg with-args) (node-args subject)
-                            (unless (rose-node-p arg)
+                          (do-rose-node-args ((arg i) subject)
+                            (unless (vectorp arg)
                               (let ((cost-1 (funcall proxy-cost-fn arg)))
                                 (consider-rewrites arg weight
                                                    (fastexp2 (- cost-1 (funcall proxy-cost-fn candidate))
                                                              beta-constant)
-                                                   (with-args (args) candidate
-                                                     (funcall context
-                                                              (apply *term-normalizer*
-                                                                     (node-fsym subject)
-                                                                     args)))))))))))
+                                                   (let ((new-node (copy-seq subject)))
+                                                     (setf (rose-node-weight new-node) 0.0
+                                                           (rose-node-n-rewrites new-node) -1
+                                                           (rose-node-cost new-node) 1
+                                                           (rose-node-arg i new-node) candidate)
+                                                     (funcall context (funcall *term-normalizer* new-node)))))))))))
                 (incf n-accepted)
                 (let ((cost (funcall cost-fn *term*)))
                   ;; Check for cost function decrease
