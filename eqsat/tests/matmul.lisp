@@ -1,10 +1,10 @@
-(uiop:define-package :egraph/tests/matmul
-    (:use #:cl #:egraph #:alexandria)
+(uiop:define-package :ggs/eqsat/tests/matmul
+    (:use #:cl #:ggs/eqsat #:alexandria)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
-(in-package :egraph/tests/matmul)
+(in-package :ggs/eqsat/tests/matmul)
 
-(def-suite* :matmul :in :egraph)
+(def-suite* :matmul :in :ggs/eqsat)
 
 (defrw assoc-matmul (matmul ?x (matmul ?y ?z)) (matmul (matmul ?x ?y) ?z))
 (defrw -assoc-matmul (matmul (matmul ?x ?y) ?z) (matmul ?x (matmul ?y ?z)))

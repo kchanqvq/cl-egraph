@@ -1,4 +1,4 @@
-(in-package :egraph)
+(in-package :ggs/stochastic)
 
 (define-variadic-structure rose-node
   "N-REWRITES = -1 means the rose tree data hasn't been computed for

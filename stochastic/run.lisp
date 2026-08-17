@@ -1,4 +1,4 @@
-(in-package :egraph)
+(in-package :ggs/stochastic)
 
 (declaim (inline fastlog2 fastexp2))
 (serapeum:eval-always

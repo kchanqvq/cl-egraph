@@ -1,5 +1,5 @@
-(uiop:define-package :egraph/tests
-    (:use #:cl #:egraph #:alexandria)
+(uiop:define-package :ggs/eqsat/tests
+    (:use #:cl #:ggs/eqsat #:alexandria)
   (:import-from #:fiveam
                 #:def-suite* #:def-suite
                 #:def-test #:is #:in-suite)
@@ -7,12 +7,12 @@
 
 (serapeum:eval-always
  (trivial-package-local-nicknames:add-package-local-nickname
-  "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "EGRAPH/TESTS"))
+  "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "GGS/EQSAT/TESTS"))
 
-(in-package :egraph/tests)
+(in-package :ggs/eqsat/tests)
 
-(def-suite* :egraph)
-(def-suite :egraph/bench)
+(def-suite* :ggs/eqsat)
+(def-suite :ggs/eqsat/bench)
 
 ;;; E-graph data structure and rebuild
 
@@ -203,7 +203,7 @@
             (when data
               (let* ((const (make-enode data)))
                 (enode-merge node const)
-                (setf (egraph::eclass-info-nodes (enode-eclass-info node))
+                (setf (ggs/eqsat::eclass-info-nodes (enode-eclass-info node))
                       (list const))))))
 
 (def-test analysis.const ()
@@ -260,7 +260,7 @@
 (defrw i-sub (i ?x (- ?f ?g)) (- (i ?x ?f) (i ?x ?g)))
 (defrw i-part (i ?x (* ?a ?b)) (- (* ?a (i ?x ?b)) (i ?x (* (d ?x ?a) (i ?x ?b)))))
 
-(def-test bench.math (:suite :egraph/bench)
+(def-test bench.math (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph)))
@@ -284,7 +284,7 @@
         (is (= 1047556 (egraph-n-enodes *egraph*)))))
     (benchmark:report timer)))
 
-(def-test bench.analysis-ac (:suite :egraph/bench)
+(def-test bench.analysis-ac (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph :analyses 'const)))

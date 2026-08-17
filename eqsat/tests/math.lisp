@@ -1,15 +1,15 @@
-(uiop:define-package :egraph/tests/math
-    (:use #:cl #:egraph #:alexandria)
+(uiop:define-package :ggs/eqsat/tests/math
+    (:use #:cl #:ggs/eqsat #:alexandria)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite)
   (:import-from #:serapeum #:collecting))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname
-   "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "EGRAPH/TESTS/MATH"))
+   "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "GGS/EQSAT/TESTS/MATH"))
 
-(in-package :egraph/tests/math)
+(in-package :ggs/eqsat/tests/math)
 
-(def-suite* :math :in :egraph)
+(def-suite* :math :in :ggs/eqsat)
 
 (define-analysis const
   :make (lambda (enode)
@@ -34,7 +34,7 @@
             (when data
               (let* ((const (make-enode data)))
                 (enode-merge node const)
-                (setf (egraph::eclass-info-nodes (enode-eclass-info node))
+                (setf (ggs/eqsat::eclass-info-nodes (enode-eclass-info node))
                       (list const))))))
 
 (define-analysis var
@@ -138,7 +138,7 @@
     (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
     (is (eq (enode-find b) (enode-find a)))))
 
-(def-test bench.math.diff (:suite :egraph/bench)
+(def-test bench.math.diff (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph :analyses '(var const))))

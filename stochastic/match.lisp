@@ -1,4 +1,4 @@
-(in-package :egraph)
+(in-package :ggs/stochastic)
 
 (defmacro klet (((name (&rest args) &body kbody)) &body body)
   `(flet ((,name ,args ,@kbody))
@@ -147,3 +147,16 @@
                               `(locally ,@(cdr clause)))))
                           clauses)))
     `(progn ,@(expand-term-match (list top-term-var) pat-rows))))
+
+(defmacro defrw* (name &rest clauses)
+  `(setf (get ',name 'term-rewrite)
+         (lambda (top-node cont)
+           (declare (function cont) (optimize speed (safety 0)))
+           (do-term-matches* top-node
+             ,@(mapcar (lambda (clause)
+                         (destructuring-bind
+                             (lhs rhs &key (guard t)) clause
+                           `(,lhs
+                             (when ,guard
+                               (funcall cont ,(expand-term-template rhs))))))
+                       clauses)))))
