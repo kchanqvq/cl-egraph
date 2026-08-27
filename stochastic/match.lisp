@@ -5,28 +5,6 @@
      (declare (dynamic-extent #',name))
      ,@body))
 
-#+nil
-(defmacro do-subterm ((subterm-var cont-var term cont) &body body)
-  (with-gensyms (process tail revtail result cont-1 arg args)
-    `(labels ((,process (,subterm-var ,cont-var)
-                ,@body
-                (when (node-p ,subterm-var)
-                  (do ((,tail (node-args ,subterm-var) (cdr ,tail))
-                       (,revtail))
-                      ((null ,tail))
-                    (declare (optimize speed)
-                             (dynamic-extent ,revtail))
-                    (klet ((,cont-1 (,result)
-                             (let ((,args (cons ,result (cdr ,tail))))
-                               (declare (dynamic-extent ,args))
-                               (dolist (,arg ,revtail)
-                                 (push ,arg ,args))
-                               (funcall ,cont-var
-                                        (apply *term-normalizer* (node-fsym ,subterm-var) ,args)))))
-                      (,process (car ,tail) #',cont-1))
-                    (push (car ,tail) ,revtail)))))
-       (,process ,term ,cont))))
-
 (defun subst-row (new old pat-row)
   (maplist (lambda (tail)
              (if (cdr tail)
@@ -101,12 +79,16 @@
              (case (rose-node-fsym ,var) ,@node-clauses)
              (case ,var ,@atom-clauses)))))))
 
-(defun expand-term-template (tmpl)
+(defun expand-term-template (tmpl cost-fn)
   (labels ((process (tmpl)
-             (cond ((consp tmpl)
-                    `(funcall *term-normalizer*
-                              (vector 0.0 -1 1 ',(car tmpl)
-                                      ,@(mapcar #'process (cdr tmpl)))))
+             (cond ((and (consp tmpl) (eql (car tmpl) :compute))
+                    (cadr tmpl))
+                   ((consp tmpl)
+                    `(let ((new-node
+                             (vector 0.0 -1 1 ',(car tmpl)
+                                     ,@(mapcar #'process (cdr tmpl)))))
+                       (setf (rose-node-cost new-node) (,cost-fn new-node))
+                       new-node))
                    ((var-p tmpl) tmpl)
                    (t `',tmpl))))
     (process tmpl)))
@@ -138,25 +120,3 @@
       (values (process pat)
               `(when (and ,@checks)
                  ,cont-expr)))))
-
-(defmacro do-term-matches* (top-term-var &rest clauses)
-  (let ((pat-rows (mapcar (lambda (clause)
-                            (multiple-value-list
-                             (decompose-occur-check
-                              (car clause)
-                              `(locally ,@(cdr clause)))))
-                          clauses)))
-    `(progn ,@(expand-term-match (list top-term-var) pat-rows))))
-
-(defmacro defrw* (name &rest clauses)
-  `(setf (get ',name 'term-rewrite)
-         (lambda (top-node cont)
-           (declare (function cont) (optimize speed (safety 0)))
-           (do-term-matches* top-node
-             ,@(mapcar (lambda (clause)
-                         (destructuring-bind
-                             (lhs rhs &key (guard t)) clause
-                           `(,lhs
-                             (when ,guard
-                               (funcall cont ,(expand-term-template rhs))))))
-                       clauses)))))

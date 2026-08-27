@@ -1,4 +1,4 @@
 (uiop:define-package :ggs/stochastic
     (:use #:cl #:alexandria #:ggs/common)
-  (:export #:rose-node #:*term-normalizer* #:do-term-matches #:stochastic-search
-           #:defrw*))
+  (:import-from #:serapeum #:eval-always)
+  (:export #:stochastic-search #:define-tree-sum-cost #:define-problem))
