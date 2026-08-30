@@ -14,9 +14,9 @@
                     ,(car tail))))
            pat-row))
 
-(defun expand-term-match (var-list pat-mat)
+(defun expand-match (var-list pat-mat)
   (unless var-list
-    (return-from expand-term-match
+    (return-from expand-match
       (mapcar #'serapeum:only-elt pat-mat)))
   ;; pattern column selection heuristics
   (when pat-mat
@@ -55,7 +55,7 @@
                      (let ,(mapcar (lambda (i arg-var)
                                      `(,arg-var (rose-node-arg ,i ,var)))
                                    (iota (length arg-vars)) arg-vars)
-                       ,@(expand-term-match
+                       ,@(expand-match
                           (append arg-vars (cdr var-list))
                           (mapcar (lambda (pat-row)
                                     (append (cdr (ensure-list (car pat-row)))
@@ -63,13 +63,13 @@
                                   pat-rows))))
                    node-clauses)
              (push `((,(car sample))
-                     ,@(expand-term-match
+                     ,@(expand-match
                         (cdr var-list)
                         (mapcar #'cdr pat-rows)))
                    atom-clauses))))
      groups)
     (append
-     (expand-term-match
+     (expand-match
       (cdr var-list)
       (mapcar (lambda (pat-row)
                 (subst-row var (car pat-row) (cdr pat-row)))
@@ -79,9 +79,9 @@
              (case (rose-node-fsym ,var) ,@node-clauses)
              (case ,var ,@atom-clauses)))))))
 
-(defun expand-term-template (tmpl cost-fn)
+(defun expand-template (tmpl cost-fn)
   (labels ((process (tmpl)
-             (cond ((and (consp tmpl) (eql (car tmpl) :compute))
+             (cond ((and (consp tmpl) (eql (car tmpl) :eval))
                     (cadr tmpl))
                    ((consp tmpl)
                     `(let ((new-node

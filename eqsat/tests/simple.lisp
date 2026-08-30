@@ -260,6 +260,13 @@
 (defrw i-sub (i ?x (- ?f ?g)) (- (i ?x ?f) (i ?x ?g)))
 (defrw i-part (i ?x (* ?a ?b)) (- (* ?a (i ?x ?b)) (i ?x (* (d ?x ?a) (i ?x ?b)))))
 
+(defrw* math-all
+  commute-add commute-mul add-0 mul-0 mul-1
+  assoc-add assoc-mul sub-canon sub-cancel distribute factor
+  d-add d-mul d-sin d-cos
+  i-const i-cos i-sin i-add i-sub i-part)
+(precompile-rule-set math-all)
+
 (def-test bench.math (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 5 do
@@ -275,11 +282,7 @@
         (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2) (/ (- 1 (sqrt five)) 2))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
-          (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1
-                          assoc-add assoc-mul sub-canon sub-cancel distribute factor
-                          d-add d-mul d-sin d-cos
-                          i-const i-cos i-sin i-add i-sub i-part)
-                        :max-iter 11))
+          (run-rewrites 'math-all :max-iter 11))
         (is (= 443792 (egraph-n-eclasses *egraph*)))
         (is (= 1047556 (egraph-n-enodes *egraph*)))))
     (benchmark:report timer)))

@@ -74,9 +74,9 @@
 (declaim (inline pow))
 (defun pow (x y) (expt x y))
 
-(defvar *math-base-rules*
-  '(COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
-    DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV))
+(defrw* math-base
+  COMMUTE-ADD COMMUTE-MUL ASSOC-ADD ASSOC-MUL SUB-CANON DIV-CANON ADD-0 MUL-0 MUL-1 -ADD-0 -MUL-1 SUB-CANCEL
+  DIV-CANCEL DISTRIBUTE FACTOR POW-MUL POW-0 POW-1 POW-2 POW-RECIP RECIP-MUL-DIV)
 
 (defrw d-var (d ?x ?x) 1 :guard (var ?x))
 (defrw d-const (d ?x ?c) 0 :guard (or (const ?c)
@@ -92,7 +92,8 @@
   :guard (and (not (eql 0 (const ?f)))
               (not (eql 0 (const ?g)))))
 
-(defvar *math-diff-rules* '(D-VAR D-CONST D-ADD D-MUL D-SIN D-COS D-LN D-POW))
+(defrw* math-diff
+  D-VAR D-CONST D-ADD D-MUL D-SIN D-COS D-LN D-POW)
 
 (defrw i-one (i 1 ?x) ?x)
 (defrw i-pow-const (i (pow ?x ?c) ?x)
@@ -103,9 +104,12 @@
 (defrw i-dif (i (- ?f ?g) ?x) (- (i ?f ?x) (i ?g ?x)))
 (defrw i-parts (i (* ?a ?b) ?x) (- (* ?a (i ?b ?x)) (i (* (d ?x ?a) (i ?b ?x)) ?x)))
 
-(defvar *math-integral-rules* '(I-ONE I-POW-CONST I-COS I-SIN I-SUM I-DIF I-PARTS))
+(defrw* math-integral
+  I-ONE I-POW-CONST I-COS I-SIN I-SUM I-DIF I-PARTS)
 
-(defvar *math-rules* (append *math-base-rules* *math-diff-rules* *math-integral-rules*))
+(defrw* math-all
+  math-base math-diff math-integral)
+(precompile-rule-set math-all)
 
 (defun ast-size-no-d-or-i (fsym arg-costs)
   (when (every #'identity arg-costs)
@@ -116,7 +120,7 @@
      (let* ((*egraph* (make-egraph :analyses '(var const)))
             (lhs (make-term ',lhs)))
        (egraph-rebuild)
-       (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
+       (run-rewrites 'math-all :max-iter 10 :initial-match-limit 1000)
        (is (eq (enode-find (make-term ',rhs)) (enode-find lhs))))))
 
 (def-math-test math.simplify-root ()
@@ -135,7 +139,7 @@
          (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
          (b (make-term '(* x (- (* 3 x) 14)))))
     (egraph-rebuild)
-    (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
+    (run-rewrites 'math-all :max-iter 10 :initial-match-limit 1000)
     (is (eq (enode-find b) (enode-find a)))))
 
 (def-test bench.math.diff (:suite :ggs/eqsat/bench)
@@ -147,7 +151,7 @@
         (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
-          (run-rewrites *math-rules* :max-iter 14))))
+          (run-rewrites 'math-all :max-iter 14))))
     (benchmark:report timer)))
 
 (def-math-test math.integral-part.1 ()
@@ -163,7 +167,7 @@
   (let* ((*egraph* (make-egraph :analyses '(var const)))
          (a (make-term '(pow (+ x (+ x x)) (+ x x)))))
     (egraph-rebuild)
-    (run-rewrites *math-rules* :max-iter 10 :initial-match-limit 1000)
+    (run-rewrites 'math-all :max-iter 10 :initial-match-limit 1000)
     (is (member (greedy-extract a #'ast-size-no-d-or-i)
                 '((pow (* 3 x) (+ x x))
                   (pow (* x 3) (+ x x)))

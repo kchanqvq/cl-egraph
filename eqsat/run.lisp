@@ -1,9 +1,65 @@
 (in-package :ggs/eqsat)
 
-(defun run-rewrites (rules &key max-iter max-time check verbose
-                             initial-match-limit
-                             (initial-ban-length 5))
-  "Run RULES repeatly on `*egraph*' until some stop criterion.
+(define-condition match-limit-exceeded (error)
+  ((name :initarg :name)
+   (rule :initarg :rule)
+   (match-limit :initarg :match-limit))
+  (:report (lambda (c s)
+             (format s "Match limit ~a for rule ~a ~a exceeded."
+                     (slot-value c 'match-limit)
+                     (slot-value c 'name)
+                     (slot-value c 'rule)))))
+
+(defun compute-rule-lambda (name rule)
+  (destructuring-bind (lhs rhs &key (guard t)) rule
+    `(lambda (&key match-limit)
+       (when match-limit
+         (let ((remaining match-limit))
+           (do-matches (top-node ,lhs)
+             (decf remaining)
+             (when (minusp remaining)
+               (error 'match-limit-exceeded
+                      :name ',name :rule ',rule :match-limit match-limit)))))
+       (do-matches (top-node ,lhs)
+         (when ,guard (enode-merge top-node ,(expand-template rhs)))))))
+
+(defun redefine-rule-set-hook (name)
+  (setf (get name 'compiled-rules) nil))
+
+(pushnew 'redefine-rule-set-hook *redefine-rule-set-hook*)
+
+(defmacro precompile-rule-set (name)
+  (let ((rules (get-rules name)))
+    `(progn
+       (assert (equal (get-rules ',name) ',rules))
+       ,@(mappend (lambda (rule)
+                    (when (symbolp rule)
+                      `((precompile-rule-set ,rule))))
+                  rules)
+       (unless (get ',name 'compiled-rules)
+         (setf (get ',name 'compiled-rules)
+               (append ,@(mapcar (lambda (rule)
+                                   (if (symbolp rule)
+                                       `(get ',rule 'compiled-rules)
+                                       `(list ,(compute-rule-lambda name rule))))
+                                 rules))))
+       ',name)))
+
+(defun ensure-compiled-rule-set (name)
+  (or (get name 'compiled-rules)
+      (setf (get name 'compiled-rules)
+            (mappend (lambda (rule)
+                       (if (symbolp rule)
+                           (ensure-compiled-rule-set rule)
+                           (list (compile nil (compute-rule-lambda name rule)))))
+                     (get-rules name)))))
+
+(defun run-rewrites (rule-sets &key max-iter max-time check verbose
+                                 initial-match-limit
+                                 (initial-ban-length 5))
+  "Run RULE-SETS repeatly on `*egraph*' until some stop criterion.
+
+RULE-SETS can be a symbol naming a single rule set, or a list of such symbols.
 
 Returns the reason for termination: one of :max-iter, :saturate.
 
@@ -18,7 +74,8 @@ this function."
         (n-iter 0)
         (ban-until-table (make-hash-table))
         (ban-times-table (make-hash-table))
-        (start-time (get-internal-real-time)))
+        (start-time (get-internal-real-time))
+        (rules (mappend #'ensure-compiled-rule-set (ensure-list rule-sets))))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))
@@ -30,7 +87,7 @@ this function."
         (when verbose (format t "Iteration ~d: " n-iter))
         (when verbose (format t "Applying rules... "))
         (unwind-protect
-             (dolist (rule (ensure-list rules))
+             (dolist (rule rules)
                (let* ((ban-until (gethash rule ban-until-table))
                       (ban-times (gethash rule ban-times-table 0))
                       (match-limit (and initial-match-limit

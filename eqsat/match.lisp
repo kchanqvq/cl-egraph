@@ -51,21 +51,18 @@ evaluate CONT-EXPR."
 (defun expand-template (tmpl)
   "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
   (labels ((process (tmpl)
-             (cond ((consp tmpl)
+             (cond ((and (consp tmpl) (eql (car tmpl) :eval))
+                    ;;; FIXME: assumes :eval only result in atoms
+                    `(let ((key-node (vector nil 3 0 ,(cadr tmpl))))
+                       (declare (dynamic-extent key-node))
+                       (intern-enode key-node)))
+                   ((consp tmpl)
                     `(let ((key-node (vector nil 3 0 ',(car tmpl) ,@(mapcar #'process (cdr tmpl)))))
                        (declare (dynamic-extent key-node))
                        (intern-enode key-node)))
                    ((var-p tmpl) tmpl)
                    (t (process (list tmpl))))))
     (process tmpl)))
-
-(define-condition match-limit-exceeded (error)
-  ((rule :initarg :rule)
-   (match-limit :initarg :match-limit))
-  (:report (lambda (c s)
-             (format s "Match limit ~a for rule ~a exceeded."
-                     (slot-value c 'match-limit)
-                     (slot-value c 'rule)))))
 
 (defmacro do-matches ((top-node-var pat) &body body)
   "Evaluate BODY for every PAT match in EGRAPH.
@@ -88,23 +85,3 @@ TOP-NODE-VAR bound to the enode matching PAT."
                                                       (make-fsym-info))))
                        *fsym-info-var-alist*)
            ,match-body))))
-
-(defmacro defrw (name lhs rhs &key (guard t))
-  "Define a rule that rewrites LHS to RHS when GUARD is evaluated to true."
-  `(defrw* ,name (,lhs ,rhs :guard ,guard)))
-
-(defmacro defrw* (name &rest clauses)
-  `(defun ,name (&key match-limit)
-     ,@(mapcan (lambda (clause)
-                 (destructuring-bind
-                     (lhs rhs &key (guard t)) clause
-                   `((when match-limit
-                       (let ((remaining match-limit))
-                         (do-matches (top-node ,lhs)
-                           (decf remaining)
-                           (when (minusp remaining)
-                             (error 'match-limit-exceeded :rule ',name :match-limit match-limit)))))
-                     (do-matches (top-node ,lhs)
-                       (when ,guard
-                         (enode-merge top-node ,(expand-template rhs)))))))
-               clauses)))
