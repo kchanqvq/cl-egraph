@@ -26,26 +26,38 @@ evaluate CONT-EXPR."
                   (gensym-1 fsym)
                   (progn (push var bound-vars) var)))
              (lisp-arg-vars (mapcar #'lisp-var arg-vars))
-             (fsym-info-var (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                              (gensym-1 fsym)))
+             (fsym-info-var (unless (var-p fsym)
+                              (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
+                                (gensym-1 fsym))))
              (lhs-bound-p (member var bound-vars))
+             (fsym-var-p (var-p fsym))
              (node-var (lisp-var var)))
+        ;; FIXME: No index for ?fsym queries yet. Do we want one?
+
         ;; Currently we use indexes (in `fsym-info') as single source of truth
         ;; for matching, thus no-need to `enode-find' representative of VAR
         ;; (even if VAR is non-rep, it once was when we built the index in
         ;; `egraph-rebuild'
-        `(dolist (,node-var ,(if lhs-bound-p
-                                 `(gethash ,var (fsym-info-node-table ,fsym-info-var))
-                                 `(fsym-info-nodes ,fsym-info-var)))
-           (let ,(mapcar (lambda (lisp-arg-var i)
-                           `(,lisp-arg-var (svref ,node-var ,i)))
-                  lisp-arg-vars (iota (length lisp-arg-vars) :start +enode-args-offset+))
-             (declare (ignorable ,@lisp-arg-vars))
-             (when (and ,@ (mapcan (lambda (lisp-var var)
-                                     (when (and (var-p var) (not (var-p lisp-var)))
-                                       `((eq ,lisp-var ,var))))
-                                   lisp-arg-vars arg-vars))
-               ,(expand-match bound-vars rest cont-expr)))))
+        `(dolist (,node-var
+                  ,(cond (fsym-var-p
+                          (assert lhs-bound-p)
+                          `(list-enodes ,var))
+                         (lhs-bound-p
+                          `(gethash ,var (fsym-info-node-table ,fsym-info-var)))
+                         (t `(fsym-info-nodes ,fsym-info-var))))
+           ;; FIXME: remove SVREF bound checks, because we've checked arity first
+           (when (= (enode-n-args ,node-var) ,(length arg-vars))
+             (let (,@(when fsym-var-p
+                       `((,fsym (enode-fsym ,node-var))))
+                   ,@(mapcar (lambda (lisp-arg-var i)
+                               `(,lisp-arg-var (svref ,node-var ,i)))
+                             lisp-arg-vars (iota (length lisp-arg-vars) :start +enode-args-offset+)))
+               (declare (ignorable ,@(when fsym-var-p `(,fsym)) ,@lisp-arg-vars))
+               (when (and ,@(mapcan (lambda (lisp-var var)
+                                      (when (and (var-p var) (not (var-p lisp-var)))
+                                        `((eq ,lisp-var ,var))))
+                                    lisp-arg-vars arg-vars))
+                 ,(expand-match bound-vars rest cont-expr))))))
       cont-expr))
 
 (defun expand-template (tmpl)

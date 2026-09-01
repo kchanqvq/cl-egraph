@@ -11,7 +11,7 @@
                      (slot-value c 'rule)))))
 
 (defun compute-rule-lambda (name rule)
-  (destructuring-bind (lhs rhs &key (guard t)) rule
+  (destructuring-bind (lhs rhs &key (guard t) prune) rule
     `(lambda (&key match-limit)
        (when match-limit
          (let ((remaining match-limit))
@@ -21,7 +21,12 @@
                (error 'match-limit-exceeded
                       :name ',name :rule ',rule :match-limit match-limit)))))
        (do-matches (top-node ,lhs)
-         (when ,guard (enode-merge top-node ,(expand-template rhs)))))))
+         (when ,guard
+           (let ((rhs-node ,(expand-template rhs)))
+             (enode-merge top-node rhs-node)
+             ,(when prune
+                `(setf (eclass-info-nodes (enode-eclass-info top-node))
+                       (list rhs-node)))))))))
 
 (defun redefine-rule-set-hook (name)
   (setf (get name 'compiled-rules) nil))
@@ -56,7 +61,8 @@
 
 (defun run-rewrites (rule-sets &key max-iter max-time check verbose
                                  initial-match-limit
-                                 (initial-ban-length 5))
+                                 (initial-ban-length 5)
+                                 prune-constant)
   "Run RULE-SETS repeatly on `*egraph*' until some stop criterion.
 
 RULE-SETS can be a symbol naming a single rule set, or a list of such symbols.
@@ -101,7 +107,7 @@ this function."
                              (+ n-iter (ash initial-ban-length ban-times)))
                        (incf (gethash rule ban-times-table 0)))))))
           (when verbose (format t "Rebuilding... "))
-          (egraph-rebuild))
+          (egraph-rebuild :prune-constant prune-constant))
         (when check (check-egraph))
         (incf n-iter)
         (let ((n-enodes-1 (egraph-n-enodes *egraph*))

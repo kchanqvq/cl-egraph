@@ -1,0 +1,101 @@
+(uiop:define-package :ggs/common
+    (:use #:cl #:alexandria)
+  (:import-from #:serapeum #:with-collector #:string-prefix-p #:eval-always)
+  (:export #:define-variadic-structure
+           #:var-p #:gensym-1
+           #:get-rules #:*redefine-rule-set-hook* #:defrw #:defrw*))
+
+(in-package :ggs/common)
+
+(defmacro define-variadic-structure (name &rest slot-and-options)
+  (let* ((doc (and (stringp (car slot-and-options)) (pop slot-and-options)))
+         (slot-and-options (mapcar #'ensure-list slot-and-options))
+         (ordinary-slots (butlast slot-and-options))
+         (last-slot (lastcar slot-and-options))
+         (singular (if (listp (car last-slot)) (caar last-slot) (car last-slot)))
+         (plural (if (listp (car last-slot)) (cadar last-slot) (format nil "~aS" (car last-slot))))
+         (offset-const (format-symbol t "+~a-~a-OFFSET+" name plural))
+         (do-args (format-symbol t "DO-~a-~a" name plural))
+         (predicate (format-symbol t "~a-P" name))
+         (arg-var (format-symbol t "~a-VAR" singular))
+         (name-var (format-symbol t "~a-VAR" name))
+         (map-args (format-symbol t "MAP-~a-~a" name plural))
+         (n-args (format-symbol t "~a-N-~a" name plural))
+         (get-arg (format-symbol t "~a-~a" name singular)))
+    `(progn
+       (declaim (inline ,predicate ,map-args ,n-args ,get-arg))
+       (defstruct (,name (:type vector) (:constructor nil))
+         ,@(and doc (list doc))
+         ,@ordinary-slots)
+       (defconstant ,offset-const ,(length ordinary-slots))
+       (deftype ,name (&optional n)
+         (cond ((eq n '*) 'simple-vector)
+               (t `(simple-vector ,(+ n ,offset-const)))))
+       (defun ,predicate (obj) (typep obj ',name))
+       (defmacro ,do-args ((,arg-var ,name-var &optional result) &body body)
+         (destructuring-bind (,arg-var &optional index-var) (ensure-list ,arg-var)
+           (once-only (,name-var)
+             (with-gensyms (i)
+               `(loop for ,i from ,,offset-const below (length ,,name-var)
+                      ,@(when index-var `(for ,index-var of-type fixnum from 0))
+                      do (symbol-macrolet ((,,arg-var (svref ,,name-var ,i)))
+                           ,@body)
+                      finally (return ,result))))))
+       (defun ,map-args (function ,name)
+         (with-collector (collect)
+           (,do-args (arg ,name)
+                     (collect (funcall function arg)))))
+       (defun ,n-args (,name)
+         (- (length ,name) ,offset-const))
+       (defmacro ,get-arg (i ,name)
+         `(svref ,,name (+ ,i ,',offset-const))))))
+
+(defun var-p (object)
+  (typecase object
+    (symbol (string-prefix-p "?" (symbol-name object)))))
+
+(defun gensym-1 (thing)
+  (make-gensym (princ-to-string thing)))
+
+(defvar *redefine-rule-set-hook* nil
+  "Run on redefined rule set and its transitive dependents.
+
+Should be a list of functions, each receives a single argument: the symbol
+naming the redefined or dependent rule set.")
+
+(defun transitive-dependents (name)
+  (let ((table (make-hash-table)))
+    (labels ((walk (name)
+               (unless (gethash name table)
+                 (setf (gethash name table) t)
+                 (mapc #'walk (get name 'dependent-rule-sets)))))
+      (walk name))
+    (hash-table-keys table)))
+
+(defun register-rule-set (name rules)
+  (let ((dependencies (remove-if-not #'symbolp rules))
+        (dependents (transitive-dependents name))
+        (old-dependencies (remove-if-not #'symbolp (get name 'rules))))
+    (when-let (cycles (intersection dependents dependencies))
+      (error "Cycle detected: ~A includes ~A" name cycles))
+    (dolist (rule old-dependencies)
+      (removef (get rule 'dependent-rule-sets) name))
+    (dolist (dependency dependencies)
+      (push name (get dependency 'dependent-rule-sets)))
+    (setf (get name 'rules) rules)
+    (dolist (dependent dependents)
+      (dolist (function *redefine-rule-set-hook*)
+        (funcall function dependent)))
+    name))
+
+(defun get-rules (name)
+  (let ((rules (get name 'rules '%unbound)))
+    (when (eql rules '%unbound)
+      (error "Undefined rule set ~A" name))
+    rules))
+
+(defmacro defrw (name &rest rule)
+  `(eval-always (register-rule-set ',name '(,rule))))
+
+(defmacro defrw* (name &body rules)
+  `(eval-always (register-rule-set ',name ',rules)))

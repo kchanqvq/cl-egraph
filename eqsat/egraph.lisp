@@ -208,7 +208,7 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
         (modify-analysis-data x)
         nil))))
 
-(defun egraph-rebuild ()
+(defun egraph-rebuild (&key prune-constant)
   ;; Upward propagation
 
   ;; Note: we allow duplicates in `egraph-work-list'. Currently we don't bother
@@ -251,23 +251,22 @@ CLASSES and FSYM-TABLE are only up-to-date after `egraph-rebuild'."
                    (setf (gethash (enode-find node) (egraph-classes *egraph*)) t))
                  (egraph-hash-cons *egraph*))
   ;; Build various node index. We used to also prune non-canonical enodes from
-  ;; eclass-info-parents here, but no doing it seems faster
+  ;; eclass-info-parents here, but not doing it seems faster
   (clrhash (egraph-fsym-table *egraph*))
   (maphash-keys (lambda (class)
-                  (let* ((info (enode-parent class))
-                         (sentinel (cons nil (eclass-info-nodes info))))
-                    (declare (dynamic-extent sentinel))
-                    (do ((prev sentinel)
-                         (current (cdr sentinel) (cdr current)))
-                        ((endp current) (setf (eclass-info-nodes info) (cdr sentinel)))
-                      (let ((node (car current)))
-                        (if (plusp (enode-canonical-flag node))
-                            (let ((fsym-info (ensure-gethash (enode-fsym node) (egraph-fsym-table *egraph*)
-                                                             (make-fsym-info))))
-                              (push node (gethash class (fsym-info-node-table fsym-info)))
-                              (push node (fsym-info-nodes fsym-info))
-                              (setf prev current))
-                            (setf (cdr prev) (cdr current)))))))
+                  (let ((info (enode-parent class)))
+                    (setf (eclass-info-nodes info)
+                          (delete-if-not (lambda (n) (plusp (enode-canonical-flag n))) (eclass-info-nodes info)))
+                    (when prune-constant
+                      (dolist (node (eclass-info-nodes info))
+                        (when (funcall prune-constant (enode-fsym node))
+                          (setf (eclass-info-nodes info) (list node))
+                          (return))))
+                    (dolist (node (eclass-info-nodes info))
+                      (let ((fsym-info (ensure-gethash (enode-fsym node) (egraph-fsym-table *egraph*)
+                                                       (make-fsym-info))))
+                        (push node (gethash class (fsym-info-node-table fsym-info)))
+                        (push node (fsym-info-nodes fsym-info))))))
                 (egraph-classes *egraph*)))
 
 ;;; Utils

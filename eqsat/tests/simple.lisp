@@ -178,69 +178,36 @@
             (run-rewrites '-add-0 :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))))
 
-;;; E-analysis
+(defrw* const-fold
+  ((+ (?a) (?b)) (:eval (+ ?a ?b))
+   :guard (and (numberp ?a) (numberp ?b))
+   :prune t)
+  ((* (?a) (?b)) (:eval (* ?a ?b))
+   :guard (and (numberp ?a) (numberp ?b))
+   :prune t))
 
-(define-analysis const
-  :make (lambda (enode)
-          (let ((fsym (enode-fsym enode)))
-            (if (plusp (enode-n-args enode))
-                (block const
-                  (let ((args (collecting
-                                (do-enode-args (arg enode)
-                                  (collect (or (const arg) (return-from const)))))))
-                    ;; Guard against things like division by zero
-                    (ignore-errors
-                     (let* ((result (apply fsym args)))
-                       ;; Coerce integral float into integer
-                       (if (floatp result)
-                           (multiple-value-bind (int frac) (truncate result (float 1.0 result))
-                             (if (zerop frac) int result))
-                           result)))))
-                (when (numberp fsym)
-                  fsym))))
-  :merge (make-orp #'=)
-  :modify (lambda (node data)
-            (when data
-              (let* ((const (make-enode data)))
-                (enode-merge node const)
-                (setf (ggs/eqsat::eclass-info-nodes (enode-eclass-info node))
-                      (list const))))))
-
-(def-test analysis.const ()
-  (let* ((*egraph* (make-egraph :analyses '(const)))
+(def-test const-fold ()
+  (let* ((*egraph* (make-egraph))
          (a (make-term '(+ 3 (+ 2 a))))
          (b (make-term '(+ a 5)))
          (c (make-term '(+ 2 (* 3 5)))))
     (egraph-rebuild)
     (is (eq :saturate
-            (run-rewrites '(commute-add commute-mul assoc-add assoc-mul) :check t :max-iter 10)))
+            (run-rewrites '(commute-add commute-mul assoc-add assoc-mul const-fold)
+                          :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))
     (is (equal 17 (greedy-extract c #'ast-size)))))
 
-(define-analysis var
-  :make (lambda (enode)
-          (when (and (zerop (enode-n-args enode)) (symbolp (enode-fsym enode)))
-            (enode-fsym enode)))
-  :merge (make-orp #'eq))
+(defrw d-var (d (?x) (?x)) 1 :guard (symbolp ?x))
+(defrw d-const (d (?x) (?c)) 0 :guard (or (numberp ?c)
+                                          (and (symbolp ?x) (symbolp ?c)
+                                               (not (eq ?x ?c)))))
 
-(defrw d-var (d ?x ?x) 1 :guard (var ?x))
-(defrw d-const (d ?x ?c) 0 :guard (or (const ?c)
-                                      (when-let* ((vx (var ?x))
-                                                  (vc (var ?c)))
-                                        (not (eq vx vc)))))
-
-(def-test analysis.multiple.1 ()
-  (let* ((*egraph* (make-egraph :analyses '(var const)))
+(def-test deriv ()
+  (let* ((*egraph* (make-egraph))
          (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
-    (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
-    (is (eq (enode-find (make-term 1)) (enode-find a)))))
-
-(def-test analysis.multiple.2 ()
-  (let* ((*egraph* (make-egraph :analyses '(const var)))
-         (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
-    (egraph-rebuild)
-    (run-rewrites '(commute-add assoc-add d-var d-const) :max-iter 10)
+    (run-rewrites '(commute-add assoc-add d-var d-const const-fold) :max-iter 10)
     (is (eq (enode-find (make-term 1)) (enode-find a)))))
 
 ;;; Micro benchmark
@@ -287,7 +254,7 @@
         (is (= 1047556 (egraph-n-enodes *egraph*)))))
     (benchmark:report timer)))
 
-(def-test bench.analysis-ac (:suite :ggs/eqsat/bench)
+#+nil (def-test bench.analysis-ac (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 5 do
       (let ((*egraph* (make-egraph :analyses 'const)))
