@@ -1,9 +1,9 @@
 (uiop:define-package :ggs/common
     (:use #:cl #:alexandria)
-  (:import-from #:serapeum #:with-collector #:string-prefix-p #:eval-always)
+  (:import-from #:serapeum #:with-collector #:string-prefix-p #:eval-always #:-> #:partition)
   (:export #:define-variadic-structure
-           #:var-p #:gensym-1
-           #:get-rules #:*redefine-rule-set-hook* #:defrw #:defrw*))
+           #:var-p #:gensym-1 #:ensure-cache
+           #:get-rules #:defrw #:defrw*))
 
 (in-package :ggs/common)
 
@@ -57,36 +57,13 @@
 (defun gensym-1 (thing)
   (make-gensym (princ-to-string thing)))
 
-(defvar *redefine-rule-set-hook* nil
-  "Run on redefined rule set and its transitive dependents.
-
-Should be a list of functions, each receives a single argument: the symbol
-naming the redefined or dependent rule set.")
-
-(defun transitive-dependents (name)
-  (let ((table (make-hash-table)))
-    (labels ((walk (name)
-               (unless (gethash name table)
-                 (setf (gethash name table) t)
-                 (mapc #'walk (get name 'dependent-rule-sets)))))
-      (walk name))
-    (hash-table-keys table)))
-
-(defun register-rule-set (name rules)
-  (let ((dependencies (remove-if-not #'symbolp rules))
-        (dependents (transitive-dependents name))
-        (old-dependencies (remove-if-not #'symbolp (get name 'rules))))
-    (when-let (cycles (intersection dependents dependencies))
-      (error "Cycle detected: ~A includes ~A" name cycles))
-    (dolist (rule old-dependencies)
-      (removef (get rule 'dependent-rule-sets) name))
-    (dolist (dependency dependencies)
-      (push name (get dependency 'dependent-rule-sets)))
-    (setf (get name 'rules) rules)
-    (dolist (dependent dependents)
-      (dolist (function *redefine-rule-set-hook*)
-        (funcall function dependent)))
-    name))
+(defmacro ensure-cache (place key newval)
+  "Helper for cache maintenance. If PLACE contains a list (OLDKEY OLDVAL) and
+OLDKEY is equal to KEY, return OLDVAL.  Otherwise evaluate NEWVAL, store (KEY
+NEWVAL) into PLACE and return NEWVAL."
+  `(if (equal (first ,place) ,key)
+       (second ,place)
+       (second (setf ,place (list ,key ,newval)))))
 
 (defun get-rules (name)
   (let ((rules (get name 'rules '%unbound)))
@@ -95,7 +72,7 @@ naming the redefined or dependent rule set.")
     rules))
 
 (defmacro defrw (name &rest rule)
-  `(eval-always (register-rule-set ',name '(,rule))))
+  `(defrw* ,name ,rule))
 
 (defmacro defrw* (name &body rules)
-  `(eval-always (register-rule-set ',name ',rules)))
+  `(eval-always (setf (get ',name 'rules) ',rules)))

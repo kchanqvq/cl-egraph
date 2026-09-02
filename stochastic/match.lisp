@@ -14,6 +14,21 @@
                     ,(car tail))))
            pat-row))
 
+(defmacro case/bind (keyform &body cases)
+  "Like CASE, but also support ((?VAR) ...) clauses, which run before
+everything else and bind ?VAR."
+  (multiple-value-bind (bind-clauses real-cases)
+      (partition (lambda (case) (and (consp (car case)) (var-p (caar case))))
+                 cases)
+    (let ((bind-forms (mapcar (lambda (clause)
+                                `(let ((,(caar clause) ,keyform))
+                                   ,@(cdr clause)))
+                              bind-clauses)))
+      (cond ((and bind-forms real-cases)
+             `(progn ,@bind-forms (case ,keyform ,@real-cases)))
+            (bind-forms `(progn ,@bind-forms))
+            (real-cases `(case ,keyform ,@real-cases))))))
+
 (defun expand-match (var-list pat-mat)
   (unless var-list
     (return-from expand-match
@@ -48,21 +63,23 @@
     (maphash-values
      (lambda (pat-rows)
        (let* ((sample (ensure-list (caar pat-rows)))
+              (fsym (car sample))
               (arg-vars (make-gensym-list (length (cdr sample))
-                                          (prin1-to-string (car sample)))))
+                                          (prin1-to-string fsym))))
          (if arg-vars
-             (push `((,(car sample))
-                     (let ,(mapcar (lambda (i arg-var)
-                                     `(,arg-var (rose-node-arg ,i ,var)))
-                                   (iota (length arg-vars)) arg-vars)
-                       ,@(expand-match
-                          (append arg-vars (cdr var-list))
-                          (mapcar (lambda (pat-row)
-                                    (append (cdr (ensure-list (car pat-row)))
-                                            (cdr pat-row)))
-                                  pat-rows))))
+             (push `((,fsym)
+                     (when (= (rose-node-n-args ,var) ,(length arg-vars))
+                       (let ,(mapcar (lambda (i arg-var)
+                                       `(,arg-var (rose-node-arg ,i ,var)))
+                                     (iota (length arg-vars)) arg-vars)
+                         ,@(expand-match
+                            (append arg-vars (cdr var-list))
+                            (mapcar (lambda (pat-row)
+                                      (append (cdr (ensure-list (car pat-row)))
+                                              (cdr pat-row)))
+                                    pat-rows)))))
                    node-clauses)
-             (push `((,(car sample))
+             (push `((,fsym)
                      ,@(expand-match
                         (cdr var-list)
                         (mapcar #'cdr pat-rows)))
@@ -76,8 +93,8 @@
               bind-rows))
      (when (or node-clauses atom-clauses)
        `((if (vectorp ,var)
-             (case (rose-node-fsym ,var) ,@node-clauses)
-             (case ,var ,@atom-clauses)))))))
+             (case/bind (rose-node-fsym ,var) ,@node-clauses)
+             (case/bind ,var ,@atom-clauses)))))))
 
 (defun expand-template (tmpl cost-fn)
   (labels ((process (tmpl)

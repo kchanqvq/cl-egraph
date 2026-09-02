@@ -28,36 +28,40 @@
                 `(setf (eclass-info-nodes (enode-eclass-info top-node))
                        (list rhs-node)))))))))
 
-(defun redefine-rule-set-hook (name)
-  (setf (get name 'compiled-rules) nil))
-
-(pushnew 'redefine-rule-set-hook *redefine-rule-set-hook*)
-
 (defmacro precompile-rule-set (name)
   (let ((rules (get-rules name)))
-    `(progn
-       (assert (equal (get-rules ',name) ',rules))
+    `(let ((rules (get-rules ',name)))
+       (assert (equal rules ',rules))
        ,@(mappend (lambda (rule)
                     (when (symbolp rule)
                       `((precompile-rule-set ,rule))))
                   rules)
-       (unless (get ',name 'compiled-rules)
-         (setf (get ',name 'compiled-rules)
-               (append ,@(mapcar (lambda (rule)
-                                   (if (symbolp rule)
-                                       `(get ',rule 'compiled-rules)
-                                       `(list ,(compute-rule-lambda name rule))))
-                                 rules))))
+       (ensure-cache (get ',name 'compiled-rules) rules
+                     (list ,@(mapcar
+                              (lambda (rule)
+                                (if (symbolp rule)
+                                    `',rule
+                                    (compute-rule-lambda name rule)))
+                              rules)))
        ',name)))
 
-(defun ensure-compiled-rule-set (name)
-  (or (get name 'compiled-rules)
-      (setf (get name 'compiled-rules)
-            (mappend (lambda (rule)
-                       (if (symbolp rule)
-                           (ensure-compiled-rule-set rule)
-                           (list (compile nil (compute-rule-lambda name rule)))))
-                     (get-rules name)))))
+(defun compiled-rules (name)
+  (labels ((precompile (name)
+             (let ((rules (get-rules name)))
+               (ensure-cache (get name 'compiled-rules) rules
+                             (mapcar (lambda (rule)
+                                       (if (symbolp rule)
+                                           (precompile rule)
+                                           (compile nil (compute-rule-lambda name rule))))
+                                     rules))))
+           (resolve (name)
+             (mappend (lambda (rule)
+                        (if (symbolp rule)
+                            (resolve rule)
+                            (list rule)))
+                      (second (get name 'compiled-rules)))))
+    (precompile name)
+    (resolve name)))
 
 (defun run-rewrites (rule-sets &key max-iter max-time check verbose
                                  initial-match-limit
@@ -81,7 +85,7 @@ this function."
         (ban-until-table (make-hash-table))
         (ban-times-table (make-hash-table))
         (start-time (get-internal-real-time))
-        (rules (mappend #'ensure-compiled-rule-set (ensure-list rule-sets))))
+        (rules (mappend #'compiled-rules (ensure-list rule-sets))))
     (catch 'stop
       (loop
         (when (and max-iter (>= n-iter max-iter))

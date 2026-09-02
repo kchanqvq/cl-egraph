@@ -90,34 +90,28 @@
                 (list rule)))
           (get-rules name)))
 
-(defun redefine-rule-set-hook (name)
-  (setf (get name 'compiled-rules) nil))
-
-(pushnew 'redefine-rule-set-hook *redefine-rule-set-hook*)
-
 (defmacro precompile-rule-set (name cost-fn)
   (let ((rules (get-rules-resolve-symbols name)))
-    `(progn
-       (assert (equal (get-rules-resolve-symbols ',name) ',rules))
-       (unless (assoc-value (get ',name 'compiled-rules) ',cost-fn)
-         (setf (assoc-value (get ',name 'compiled-rules) ',cost-fn)
-               (list ,@(collecting
-                         (doplist (key lambda (compute-rule-set-lambda cost-fn rules))
-                           (collect `',key)
-                           (collect lambda)))))))))
+    `(let ((rules (get-rules-resolve-symbols ',name)))
+       (assert (equal rules ',rules))
+       (ensure-cache (assoc-value (get ',name 'compiled-rules) ',cost-fn) rules
+                     (list ,@(collecting
+                               (doplist (key lambda (compute-rule-set-lambda cost-fn rules))
+                                        (collect `',key)
+                                 (collect lambda))))))))
 
-(defun ensure-compiled-rule-set (name cost-fn)
-  (or (assoc-value (get name 'compiled-rules) cost-fn)
-      (setf (assoc-value (get name 'compiled-rules) cost-fn)
-            (collecting
-              (doplist (key lambda (compute-rule-set-lambda cost-fn (get-rules-resolve-symbols name)))
-                (collect key)
-                (collect (compile nil lambda)))))))
+(defun compiled-rule-set (name cost-fn)
+  (let ((rules (get-rules-resolve-symbols name)))
+    (ensure-cache (assoc-value (get name 'compiled-rules) cost-fn) rules
+                  (collecting
+                    (doplist (key lambda (compute-rule-set-lambda cost-fn (get-rules-resolve-symbols name)))
+                             (collect key)
+                      (collect (compile nil lambda)))))))
 
 ;;; FIXME: the following assumes:
-;;; 1. :eval only result in atoms, not rose-nodes
-;;; 2. non 0-ary function symbols are never reused as atoms
-;;; 3. assume atoms are all in the T case
+;;; 1. :eval only result in constants, never compound terms
+;;; 2. non 0-ary function symbols are never reused as constants
+;;; 3. constants are all in the T case
 
 (defun get-case (key cases)
   (dolist (case cases)
@@ -142,13 +136,13 @@
                       (incf (gethash tmpl coefficients 0)))
                      (t (incf secant (default-case cases))))))
       (process tmpl)
-      `(the alexandria:non-negative-fixnum
+      `(the non-negative-fixnum
             (+ ,secant
                ,@(serapeum:collecting
                    (maphash (lambda (var c)
-                              (collect `(the alexandria:non-negative-fixnum
-                                             (* ,c (if (ggs/stochastic::rose-node-p ,var)
-                                                       (ggs/stochastic::rose-node-cost ,var)
+                              (collect `(the non-negative-fixnum
+                                             (* ,c (if (rose-node-p ,var)
+                                                       (rose-node-cost ,var)
                                                        ,(default-case cases))))))
                             coefficients)))))))
 
@@ -254,7 +248,7 @@
   (let* ((end-time (and max-time
                         (+ (get-internal-real-time)
                            (* max-time internal-time-units-per-second))))
-         (compiled-rule-sets (mapcar (rcurry #'ensure-compiled-rule-set cost-fn) (ensure-list rule-sets)))
+         (compiled-rule-sets (mapcar (rcurry #'compiled-rule-set cost-fn) (ensure-list rule-sets)))
          (cost-fns (mapcar (rcurry #'getf 'term-rewrite-cost) compiled-rule-sets))
          (inf-fns (mapcar (rcurry #'getf 'term-rewrite-inf-temp) compiled-rule-sets))
          (fin-fns (mapcar (rcurry #'getf 'term-rewrite-fin-temp) compiled-rule-sets))
@@ -383,7 +377,7 @@
                           (:error (error "Error in worker: ~a" (cadr result))))))))))
         ((> nproc 1)
          ;; Compile rule sets in main thread only
-         (mapc (rcurry #'ensure-compiled-rule-set cost-fn) rule-sets)
+         (mapc (rcurry #'compiled-rule-set cost-fn) rule-sets)
          (let* ((finish-flag (list nil))
                 (threads (mapcar (lambda (i)
                                    (bt:make-thread
